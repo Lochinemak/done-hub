@@ -24,6 +24,7 @@ func (r *relayModerations) setRequest() error {
 	if err := common.UnmarshalBodyReusable(r.c, &r.request); err != nil {
 		return err
 	}
+	setLogUserInput(r.c, extractFirstStringValue(r.request.Input))
 
 	if r.request.Model == "" {
 		r.request.Model = "text-moderation-stable"

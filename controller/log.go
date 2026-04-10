@@ -214,7 +214,7 @@ func ExportLogsList(c *gin.Context) {
 	// Write CSV headers
 	headers := []string{
 		"时间", "渠道", "用户", "分组", "令牌", "类型", "模型",
-		"耗时(秒)", "输入Token", "输出Token", "额度", "来源IP", "详情",
+		"耗时(秒)", "用户输入", "输入Token", "输出Token", "额度", "来源IP", "详情",
 	}
 	if err := writer.Write(headers); err != nil {
 		common.APIRespondWithError(c, http.StatusOK, err)
@@ -263,7 +263,7 @@ func ExportUserLogsList(c *gin.Context) {
 	// Write CSV headers (without admin-only columns)
 	headers := []string{
 		"时间", "分组", "令牌", "类型", "模型",
-		"耗时(秒)", "输入Token", "输出Token", "额度", "来源IP", "详情",
+		"耗时(秒)", "用户输入", "输入Token", "输出Token", "额度", "来源IP", "详情",
 	}
 	if err := writer.Write(headers); err != nil {
 		common.APIRespondWithError(c, http.StatusOK, err)
@@ -344,6 +344,7 @@ func formatLogToCSVRow(log *model.Log, isAdmin bool) []string {
 			typeStr,
 			log.ModelName,
 			durationStr,
+			log.UserInput,
 			inputTokensStr,
 			outputTokensStr,
 			quotaStr,
@@ -359,6 +360,7 @@ func formatLogToCSVRow(log *model.Log, isAdmin bool) []string {
 			typeStr,
 			log.ModelName,
 			durationStr,
+			log.UserInput,
 			inputTokensStr,
 			outputTokensStr,
 			quotaStr,

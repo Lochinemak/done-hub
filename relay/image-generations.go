@@ -52,6 +52,7 @@ func (r *relayImageGenerations) setRequest() error {
 		}
 	}
 
+	setLogUserInput(r.c, r.request.Prompt)
 	r.setOriginalModel(r.request.Model)
 
 	return nil
@@ -117,6 +118,7 @@ func (r *relayImageGenerations) setGeminiRequest() error {
 		r.request.N = 1
 	}
 
+	setLogUserInput(r.c, r.request.Prompt)
 	r.setOriginalModel(r.request.Model)
 
 	return nil

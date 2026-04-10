@@ -139,7 +139,7 @@ func (q *Quota) UpdateUserRealtimeQuota(usage *types.UsageEvent, nowUsage *types
 	return nil
 }
 
-func (q *Quota) completedQuotaConsumption(usage *types.Usage, tokenName string, isStream bool, sourceIp string, ctx context.Context) error {
+func (q *Quota) completedQuotaConsumption(usage *types.Usage, tokenName string, userInput string, isStream bool, sourceIp string, ctx context.Context) error {
 	defer func() {
 		if q.cacheQuota > 0 {
 			model.CacheDecreaseUserRealtimeQuota(q.userId, q.cacheQuota)
@@ -178,6 +178,7 @@ func (q *Quota) completedQuotaConsumption(usage *types.Usage, tokenName string, 
 		tokenName,
 		quota,
 		"",
+		userInput,
 		q.getRequestTime(),
 		isStream,
 		q.GetLogMeta(usage),
@@ -204,6 +205,7 @@ func (q *Quota) Undo(c *gin.Context) {
 
 func (q *Quota) Consume(c *gin.Context, usage *types.Usage, isStream bool) {
 	tokenName := c.GetString("token_name")
+	userInput := c.GetString(config.GinLogUserInputKey)
 	sourceIp := c.ClientIP() // 在 goroutine 外提取，避免 Gin Context 回收后数据竞争
 	q.startTime = c.GetTime("requestStartTime")
 	// 如果没有报错，则消费配额
@@ -213,7 +215,7 @@ func (q *Quota) Consume(c *gin.Context, usage *types.Usage, isStream bool) {
 				logger.LogError(ctx, fmt.Sprintf("panic in completedQuotaConsumption: %v", r))
 			}
 		}()
-		err := q.completedQuotaConsumption(usage, tokenName, isStream, sourceIp, ctx)
+		err := q.completedQuotaConsumption(usage, tokenName, userInput, isStream, sourceIp, ctx)
 		if err != nil {
 			logger.LogError(ctx, err.Error())
 		}

@@ -8,4 +8,5 @@ const (
 
 	GinProcessedBytesKey        = "processed_request_bytes"
 	GinProcessedBytesIsVertexAI = "processed_bytes_is_vertexai"
+	GinLogUserInputKey          = "log_user_input"
 )

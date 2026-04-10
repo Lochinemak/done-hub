@@ -420,6 +420,7 @@
     "modelLabel": "模型",
     "durationLabel": "耗时",
     "durationTooltip": "t/s：输出Token的数量除以总生成时间，表示生成速度",
+    "userInputLabel": "用户输入",
     "inputLabel": "输入",
     "outputLabel": "输出",
     "quotaLabel": "额度",

@@ -31,6 +31,10 @@ func (r *relayResponses) setRequest() error {
 		return err
 	}
 
+	if messages, err := r.responsesRequest.InputToMessages(); err == nil {
+		setLogUserInput(r.c, extractLastUserMessage(messages))
+	}
+
 	r.setOriginalModel(r.responsesRequest.Model)
 
 	return nil

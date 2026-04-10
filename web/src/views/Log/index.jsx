@@ -79,6 +79,7 @@ export default function Log() {
     type: true,
     model_name: true,
     duration: true,
+    user_input: true,
     message: true,
     completion: true,
     quota: true,
@@ -514,6 +515,7 @@ export default function Log() {
                 { id: 'type', label: t('logPage.typeLabel') },
                 { id: 'model_name', label: t('logPage.modelLabel') },
                 { id: 'duration', label: t('logPage.durationLabel') },
+                { id: 'user_input', label: t('logPage.userInputLabel') },
                 { id: 'message', label: t('logPage.inputLabel') },
                 { id: 'completion', label: t('logPage.outputLabel') },
                 { id: 'quota', label: t('logPage.quotaLabel') },
@@ -588,6 +590,12 @@ export default function Log() {
                     tooltip: t('logPage.durationTooltip'),
                     disableSort: true,
                     hide: !columnVisibility.duration
+                  },
+                  {
+                    id: 'user_input',
+                    label: t('logPage.userInputLabel'),
+                    disableSort: true,
+                    hide: !columnVisibility.user_input
                   },
                   {
                     id: 'message',

@@ -70,6 +70,7 @@ func (r *relayVeoOnly) setRequest() error {
 		}
 	}
 
+	setLogUserInput(r.c, r.veoRequest.Instances[0].Prompt)
 	r.setOriginalModel(modelList[0])
 	r.c.Set("original_model", modelList[0])
 

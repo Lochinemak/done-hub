@@ -423,6 +423,7 @@
     "durationTooltip": "t/s：輸出Token的數量除以總生成時間，表示生成速度",
     "groupLabel": "分組",
     "inputAudioTokens": "輸入音頻Tokens (* {{ ratio }})",
+    "userInputLabel": "用戶輸入",
     "inputLabel": "輸入",
     "inputTextTokens": "輸入文本Tokens (* {{ ratio }})",
     "modelLabel": "模型",

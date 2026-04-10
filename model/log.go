@@ -19,6 +19,7 @@ type Log struct {
 	CreatedAt        int64                              `json:"created_at" gorm:"bigint;index:idx_created_at_type;index:idx_user_created_at"`
 	Type             int                                `json:"type" gorm:"index:idx_created_at_type"`
 	Content          string                             `json:"content"`
+	UserInput        string                             `json:"user_input" gorm:"type:text"`
 	Username         string                             `json:"username" gorm:"index:index_username_model_name,priority:2;default:''"`
 	TokenName        string                             `json:"token_name" gorm:"index;default:''"`
 	ModelName        string                             `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
@@ -119,6 +120,7 @@ func RecordConsumeLog(
 	tokenName string,
 	quota int,
 	content string,
+	userInput string,
 	requestTime int,
 	isStream bool,
 	metadata map[string]any,
@@ -136,6 +138,7 @@ func RecordConsumeLog(
 		CreatedAt:        utils.GetTimestamp(),
 		Type:             LogTypeConsume,
 		Content:          content,
+		UserInput:        userInput,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		TokenName:        tokenName,

@@ -31,6 +31,7 @@ func (r *relayEmbeddings) setRequest() error {
 	if err := common.UnmarshalBodyReusable(r.c, &r.request); err != nil {
 		return err
 	}
+	setLogUserInput(r.c, extractFirstStringValue(r.request.Input))
 
 	r.setOriginalModel(r.request.Model)
 

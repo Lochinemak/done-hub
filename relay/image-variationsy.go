@@ -33,6 +33,7 @@ func (r *relayImageVariations) setRequest() error {
 		r.request.Size = "1024x1024"
 	}
 
+	setLogUserInput(r.c, r.request.Prompt)
 	r.setOriginalModel(r.request.Model)
 
 	return nil

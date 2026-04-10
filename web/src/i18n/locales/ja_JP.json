@@ -418,6 +418,7 @@
     "durationTooltip": "t/s: 出力トークンの数を総生成時間で割った値であり、生成速度を示します。",
     "groupLabel": "グループ",
     "inputAudioTokens": "Input audio tokens (* {{ ratio }})",
+    "userInputLabel": "ユーザー入力",
     "inputLabel": "入力",
     "inputTextTokens": "Input text tokens (* {{ ratio }})",
     "modelLabel": "モデル",

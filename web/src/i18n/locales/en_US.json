@@ -478,6 +478,7 @@
     "durationTooltip": "t/s: The number of output tokens divided by the total generation time, indicating the generation speed",
     "groupLabel": "Group",
     "inputAudioTokens": "Input audio tokens (* {{ ratio }})",
+    "userInputLabel": "User Input",
     "inputLabel": "Input",
     "inputTextTokens": "Input text tokens (* {{ ratio }})",
     "modelLabel": "Model",

@@ -71,6 +71,7 @@ func (r *relayGeminiOnly) setRequest() error {
 		return err
 	}
 	r.requestBody = rawBody
+	setLogUserInput(r.c, extractLastGeminiUserText(r.requestBody))
 
 	r.geminiRequest = &gemini.GeminiChatRequest{
 		Model:  modelList[0],

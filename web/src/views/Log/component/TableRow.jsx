@@ -165,6 +165,17 @@ export default function LogTableRow({ item, userIsAdmin, userGroup, columnVisibi
             </Stack>
           </TableCell>
         )}
+        {columnVisibility.user_input && (
+          <TableCell
+            sx={{
+              p: '10px 8px',
+              textAlign: 'left',
+              maxWidth: 260
+            }}
+          >
+            {viewUserInput(item.user_input)}
+          </TableCell>
+        )}
         {columnVisibility.message && (
           <TableCell
             sx={{
@@ -301,6 +312,37 @@ function viewInput(item, t, totalInputTokens, totalOutputTokens, show, tokenDeta
         <span style={{ cursor: 'help' }}>{prompt_tokens}</span>
       </Tooltip>
     </Badge>
+  )
+}
+
+function viewUserInput(userInput) {
+  if (!userInput) {
+    return ''
+  }
+
+  return (
+    <Tooltip
+      title={
+        <Typography sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {userInput}
+        </Typography>
+      }
+      placement="top"
+      arrow
+    >
+      <Typography
+        variant="body2"
+        sx={{
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: 260,
+          cursor: 'help'
+        }}
+      >
+        {userInput}
+      </Typography>
+    </Tooltip>
   )
 }
 

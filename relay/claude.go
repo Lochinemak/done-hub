@@ -50,6 +50,7 @@ func (r *relayClaudeOnly) setRequest() error {
 	if err := common.UnmarshalBodyReusable(r.c, r.claudeRequest); err != nil {
 		return err
 	}
+	setLogUserInput(r.c, extractClaudeUserMessage(r.claudeRequest.Messages))
 	r.setOriginalModel(r.claudeRequest.Model)
 	// 设置原始模型到 Context，用于统一请求响应模型功能
 	r.c.Set("original_model", r.claudeRequest.Model)

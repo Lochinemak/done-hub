@@ -33,6 +33,7 @@ func (r *relayCompletions) setRequest() error {
 	if err := common.UnmarshalBodyReusable(r.c, &r.request); err != nil {
 		return err
 	}
+	setLogUserInput(r.c, extractCompletionPrompt(r.request.Prompt))
 
 	if r.request.MaxTokens < 0 || r.request.MaxTokens > math.MaxInt32/2 {
 		return errors.New("max_tokens is invalid")
