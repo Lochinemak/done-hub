@@ -323,12 +323,33 @@ function viewUserInput(userInput) {
   return (
     <Tooltip
       title={
-        <Typography sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <Typography sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'text.primary' }}>
           {userInput}
         </Typography>
       }
       placement="top"
       arrow
+      slotProps={{
+        tooltip: {
+          sx: {
+            bgcolor: 'background.paper',
+            color: 'text.primary',
+            border: 1,
+            borderColor: 'divider',
+            boxShadow: 3,
+            maxWidth: 360
+          }
+        },
+        arrow: {
+          sx: {
+            color: 'background.paper',
+            '&:before': {
+              border: 1,
+              borderColor: 'divider'
+            }
+          }
+        }
+      }}
     >
       <Typography
         variant="body2"
