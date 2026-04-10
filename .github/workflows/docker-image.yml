@@ -3,7 +3,7 @@ name: done-hub docker image
 on:
   push:
     branches:
-      - main
+      - dev
     tags:
       - "v*"
     paths-ignore:
