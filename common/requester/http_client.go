@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"crypto/tls"
 	"done-hub/common/logger"
 	"done-hub/common/utils"
 	"fmt"
@@ -18,6 +19,9 @@ func InitHttpClient() {
 	// 响应头超时配置，默认 120 秒，防止请求体发送完成后上游长时间不返回响应头
 	responseHeaderSeconds := utils.GetOrDefault("response_header_timeout", 120)
 	responseHeaderTimeout := time.Duration(responseHeaderSeconds) * time.Second
+
+	// TLS 证书验证配置，默认 false，设为 true 可跳过证书验证（用于 IP 直连等场景）
+	tlsInsecureSkipVerify := utils.GetOrDefault("tls_insecure_skip_verify", false)
 
 	trans := &http.Transport{
 		DialContext: utils.Socks5ProxyFunc,
@@ -39,6 +43,10 @@ func InitHttpClient() {
 		ForceAttemptHTTP2:  true,
 	}
 
+	if tlsInsecureSkipVerify {
+		trans.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
 	HTTPClient = &http.Client{
 		Transport: trans,
 		Timeout:   0,
@@ -56,6 +64,6 @@ func InitHttpClient() {
 		relayRequestTimeout = time.Duration(requestTimeout) * time.Second
 	}
 
-	logger.SysLog(fmt.Sprintf("HTTP Client: relay_timeout=%ds, response_header_timeout=%ds, relay_request_timeout=%ds, tls_handshake_timeout=%ds",
-		relayTimeout, responseHeaderSeconds, requestTimeout, tlsHandshakeSeconds))
+	logger.SysLog(fmt.Sprintf("HTTP Client: relay_timeout=%ds, response_header_timeout=%ds, relay_request_timeout=%ds, tls_handshake_timeout=%ds, tls_insecure_skip_verify=%v",
+		relayTimeout, responseHeaderSeconds, requestTimeout, tlsHandshakeSeconds, tlsInsecureSkipVerify))
 }
