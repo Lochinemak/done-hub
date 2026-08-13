@@ -56,8 +56,13 @@ type ClaudeErrorInfo struct {
 	Message string `json:"message"`
 }
 
+// ClaudeMetadata.UserId 用 json.RawMessage 保存，以同时兼容两种 claude-cli 报文格式：
+//  1. 旧格式：字符串 `"user_<hex>_account__session_<uuid>"`
+//  2. 新格式：对象 `{"device_id":"<hex>","account_uuid":"...","session_id":"<uuid>"}`
+//
+// 若仍按 string 反序列化，新格式会让 done-hub 在入口处 400 拒绝整个请求。
 type ClaudeMetadata struct {
-	UserId string `json:"user_id"`
+	UserId json.RawMessage `json:"user_id,omitempty"`
 }
 
 type ResContent struct {
@@ -131,7 +136,7 @@ type ClaudeRequest struct {
 	Thinking      *Thinking       `json:"thinking,omitempty"`
 	McpServers    any             `json:"mcp_servers,omitempty"`
 	Metadata      *ClaudeMetadata `json:"metadata,omitempty"`
-	Stream        bool            `json:"stream"`
+	Stream        bool            `json:"stream,omitempty"`
 }
 
 type Thinking struct {
@@ -156,13 +161,40 @@ type Tools struct {
 }
 
 type Usage struct {
-	InputTokens              int `json:"input_tokens,omitempty"`
-	OutputTokens             int `json:"output_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreation            any `json:"cache_creation,omitempty"`
+	InputTokens              int                 `json:"input_tokens,omitempty"`
+	OutputTokens             int                 `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int                 `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int                 `json:"cache_read_input_tokens,omitempty"`
+	CacheCreation            *CacheCreationUsage `json:"cache_creation,omitempty"`
 
 	ServerToolUse *ServerToolUse `json:"server_tool_use,omitempty"`
+}
+
+// CacheCreationUsage 对应 Anthropic usage.cache_creation 嵌套对象。
+// Anthropic 协议：扁平 cache_creation_input_tokens == Ephemeral5m + Ephemeral1h 之和，
+// 两者**同时返回**而非互斥。但嵌套字段不被信任为权威——计费侧以扁平字段为准（见
+// ClaudeUsageToOpenaiUsage），嵌套仅用于推断 1h 占比；扁平为 0 时回退到嵌套之和
+// 兼容仅返回嵌套的第三方网关。
+// 注意：Anthropic 后续若新增 TTL 桶（如 30s、1d），需同步更新 ClaudeUsageToOpenaiUsage
+// 的拆桶分支以及 UnmarshalJSON 里 cache_creation 的字段归一化列表。
+type CacheCreationUsage struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+}
+
+// GetCacheCreationTotalTokens 返回缓存创建总 token 数。
+// 扁平字段为权威来源；缺失时回退到嵌套 ephemeral_*_input_tokens 之和兼容仅返回嵌套的第三方网关。
+func (u *Usage) GetCacheCreationTotalTokens() int {
+	if u == nil {
+		return 0
+	}
+	if u.CacheCreationInputTokens > 0 {
+		return u.CacheCreationInputTokens
+	}
+	if u.CacheCreation == nil {
+		return 0
+	}
+	return u.CacheCreation.Ephemeral5mInputTokens + u.CacheCreation.Ephemeral1hInputTokens
 }
 
 // UnmarshalJSON 自定义 JSON 解析，兼容浮点数 token 值
@@ -200,6 +232,21 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 		if v, ok := raw[field]; ok {
 			processedData[field] = convertToInt(v)
 		}
+	}
+
+	// 同样规则下沉到嵌套的 cache_creation：上游若把 ephemeral_*_input_tokens
+	// 序列化成浮点，标准 unmarshal 到 int 字段会整体失败，导致本请求的 usage 全部丢失。
+	if ccRaw, ok := raw["cache_creation"].(map[string]interface{}); ok {
+		ccNormalized := make(map[string]interface{}, len(ccRaw))
+		for k, v := range ccRaw {
+			ccNormalized[k] = v
+		}
+		for _, field := range []string{"ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"} {
+			if v, ok := ccRaw[field]; ok {
+				ccNormalized[field] = convertToInt(v)
+			}
+		}
+		processedData["cache_creation"] = ccNormalized
 	}
 
 	// 将处理后的数据重新序列化

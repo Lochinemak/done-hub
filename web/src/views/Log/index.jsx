@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { showError, showSuccess, trims, useIsAdmin } from 'utils/common'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { renderQuota, showError, showSuccess, trims, useIsAdmin } from 'utils/common'
 
 import Table from '@mui/material/Table'
 import TableBody from '@mui/material/TableBody'
@@ -20,6 +20,7 @@ import {
   ListItemText,
   Menu,
   MenuItem,
+  Skeleton,
   Stack,
   Tab,
   Tabs,
@@ -37,9 +38,15 @@ import useMediaQuery from '@mui/material/useMediaQuery'
 import { useTheme } from '@mui/material/styles'
 import { useSelector } from 'react-redux'
 import { useLogType } from './type/LogType'
+import useStickyShadow from 'hooks/useStickyShadow'
+import FilterCollapse from 'ui-component/FilterCollapse'
+
+// 「全部」和「消费」两个 Tab 才显示总消费汇总
+const isCostLogType = (v) => v === '0' || v === '2'
 
 export default function Log() {
   const { t } = useTranslation()
+  const stickyShadowRef = useStickyShadow()
   const LogType = useLogType()
   const originalKeyword = {
     p: 0,
@@ -50,7 +57,9 @@ export default function Log() {
     end_timestamp: dayjs().unix() + 3600,
     log_type: '0',
     channel_id: '',
-    source_ip: ''
+    source_ip: '',
+    request_id: '',
+    upstream_request_id: ''
   }
 
   const [page, setPage] = useState(0)
@@ -67,7 +76,18 @@ export default function Log() {
   const matchUpMd = useMediaQuery(theme.breakpoints.up('sm'))
 
   const [logs, setLogs] = useState([])
+  // null = 未加载 / 加载中（渲染为 '—'）；数字 = 已加载汇总值
+  const [totalQuota, setTotalQuota] = useState(null)
+  const statReqIdRef = useRef(0)
+  // dataReqIdRef: fetchData 的"最新请求 id"，同 statReqIdRef 模式防 race。
+  // 之前 searchLogs 删了 if (searching) return 守卫，回车连按或点击连按会发起多个并行 fetchData，
+  // 旧响应到达晚于新响应时会用过时数据覆盖 listCount/logs。
+  const dataReqIdRef = useRef(0)
   const userIsAdmin = useIsAdmin()
+
+  // 取自 searchKeyword 而非 toolBarValue：与实际触发查询的数据源对齐，
+  // 避免未来如果工具栏改 log_type 不立即触发搜索时显示与列表脱节
+  const showTotalCost = isCostLogType(searchKeyword.log_type)
 
   // 添加列显示设置相关状态
   const [columnVisibility, setColumnVisibility] = useState({
@@ -84,6 +104,8 @@ export default function Log() {
     completion: true,
     quota: true,
     source_ip: true,
+    request_id: false,
+    upstream_request_id: false,
     detail: true
   })
   const [columnMenuAnchor, setColumnMenuAnchor] = useState(null)
@@ -137,12 +159,7 @@ export default function Log() {
     savePageSize('log', newRowsPerPage)
   }
 
-  const searchLogs = async() => {
-    // 如果正在搜索中，防止重复提交
-    if (searching) {
-      return
-    }
-
+  const searchLogs = () => {
     setPage(0)
     // 使用时间戳来确保即使搜索条件相同也能触发重新搜索
     const searchPayload = {
@@ -165,6 +182,7 @@ export default function Log() {
 
   const fetchData = useCallback(
     async(page, rowsPerPage, keyword, order, orderBy) => {
+      const reqId = ++dataReqIdRef.current
       setSearching(true)
       keyword = trims(keyword)
 
@@ -181,6 +199,7 @@ export default function Log() {
         if (!userIsAdmin) {
           delete keyword.username
           delete keyword.channel_id
+          delete keyword.upstream_request_id
         }
 
         const res = await API.get(url, {
@@ -191,6 +210,8 @@ export default function Log() {
             ...keyword
           }
         })
+        // 过期响应直接丢弃，不污染 list / searching state
+        if (reqId !== dataReqIdRef.current) return
         const { success, message, data } = res.data
         if (success) {
           setListCount(data.total_count)
@@ -199,9 +220,52 @@ export default function Log() {
           showError(message)
         }
       } catch (error) {
+        if (reqId !== dataReqIdRef.current) return
+        console.error(error)
+      } finally {
+        // 仅当当前请求仍是最新请求时才清掉 searching；
+        // 否则后到的旧响应会把刚刚因新请求设的 searching=true 错误地清零。
+        if (reqId === dataReqIdRef.current) {
+          setSearching(false)
+        }
+      }
+    },
+    [userIsAdmin]
+  )
+
+  const fetchStat = useCallback(
+    async(keyword) => {
+      const cleaned = trims(keyword)
+      if (cleaned._timestamp) delete cleaned._timestamp
+      if (!isCostLogType(cleaned.log_type)) {
+        setTotalQuota(null)
+        return
+      }
+      if (!userIsAdmin) {
+        delete cleaned.username
+        delete cleaned.channel_id
+        delete cleaned.upstream_request_id
+      }
+
+      // 请求前清零（避免显示旧值），同时用 reqId 防 race：
+      // 快速切 Tab / 连点搜索时，仅最后一次发出的请求结果会被采纳
+      const reqId = ++statReqIdRef.current
+      setTotalQuota(null)
+      try {
+        const url = userIsAdmin ? '/api/log/stat' : '/api/log/self/stat'
+        const res = await API.get(url, { params: cleaned })
+        if (reqId !== statReqIdRef.current) return
+        if (res.data?.success) {
+          setTotalQuota(res.data.data?.quota || 0)
+        } else {
+          // 业务失败也要终结 Skeleton，避免用户面对永久骨架
+          setTotalQuota(0)
+        }
+      } catch (error) {
+        if (reqId !== statReqIdRef.current) return
+        setTotalQuota(0)
         console.error(error)
       }
-      setSearching(false)
     },
     [userIsAdmin]
   )
@@ -245,6 +309,7 @@ export default function Log() {
       if (!userIsAdmin) {
         delete params.username
         delete params.channel_id
+        delete params.upstream_request_id
       }
 
       // 使用fetch进行同步请求，提供更好的错误处理
@@ -295,6 +360,10 @@ export default function Log() {
     fetchData(page, rowsPerPage, searchKeyword, order, orderBy)
   }, [page, rowsPerPage, searchKeyword, order, orderBy, fetchData, refreshFlag])
 
+  useEffect(() => {
+    fetchStat(searchKeyword)
+  }, [searchKeyword, refreshFlag, fetchStat])
+
   return (
     <>
       <style>
@@ -333,10 +402,12 @@ export default function Log() {
             })}
           </Tabs>
         </Box>
-        <Box component="form" noValidate>
-          <TableToolBar filterName={toolBarValue} handleFilterName={handleToolBarValue} userIsAdmin={userIsAdmin}
-                        onSearch={searchLogs}/>
-        </Box>
+        <FilterCollapse>
+          <Box component="form" noValidate>
+            <TableToolBar filterName={toolBarValue} handleFilterName={handleToolBarValue} userIsAdmin={userIsAdmin}
+                          onSearch={searchLogs}/>
+          </Box>
+        </FilterCollapse>
         <Toolbar
           sx={{
             textAlign: 'right',
@@ -520,6 +591,8 @@ export default function Log() {
                 { id: 'completion', label: t('logPage.outputLabel') },
                 { id: 'quota', label: t('logPage.quotaLabel') },
                 { id: 'source_ip', label: t('logPage.sourceIp') },
+                { id: 'request_id', label: t('logPage.requestId') },
+                { id: 'upstream_request_id', label: t('logPage.upstreamRequestId'), adminOnly: true },
                 { id: 'detail', label: t('logPage.detailLabel') }
               ].map(
                 (column) =>
@@ -534,7 +607,7 @@ export default function Log() {
           </Container>
         </Toolbar>
         {searching && <LinearProgress/>}
-        <PerfectScrollbar component="div">
+        <PerfectScrollbar component="div" containerRef={stickyShadowRef}>
           <TableContainer sx={{ overflow: 'unset' }}>
             <Table sx={{ minWidth: 800 }}>
               <KeywordTableHead
@@ -622,6 +695,18 @@ export default function Log() {
                     hide: !columnVisibility.source_ip
                   },
                   {
+                    id: 'request_id',
+                    label: t('logPage.requestId'),
+                    disableSort: true,
+                    hide: !columnVisibility.request_id
+                  },
+                  {
+                    id: 'upstream_request_id',
+                    label: t('logPage.upstreamRequestId'),
+                    disableSort: true,
+                    hide: !columnVisibility.upstream_request_id || !userIsAdmin
+                  },
+                  {
                     id: 'detail',
                     label: t('logPage.detailLabel'),
                     disableSort: true,
@@ -644,17 +729,75 @@ export default function Log() {
             </Table>
           </TableContainer>
         </PerfectScrollbar>
-        <TablePagination
-          page={page}
-          component="div"
-          count={listCount}
-          rowsPerPage={rowsPerPage}
-          onPageChange={handleChangePage}
-          rowsPerPageOptions={PAGE_SIZE_OPTIONS}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-          showFirstButton
-          showLastButton
-        />
+        <Box
+          sx={(theme) => ({
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            alignItems: { xs: 'stretch', sm: 'center' },
+            rowGap: 1,
+            minHeight: { xs: 'auto', sm: 56 },
+            px: { xs: 2, sm: 3 },
+            py: { xs: 1, sm: 0 },
+            bgcolor: theme.headBackgroundColor,
+            borderTop: `1px dashed ${theme.tableBorderBottom}`
+          })}
+        >
+          {showTotalCost && (
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={0.75}
+              sx={{ width: { xs: '100%', sm: 'auto' }, flexShrink: 0 }}
+            >
+              <Icon
+                icon="solar:dollar-minimalistic-bold-duotone"
+                width={16}
+                color={theme.palette.primary.main}
+              />
+              <Typography variant="body2" color="text.secondary">
+                {t('logPage.totalCost')}
+              </Typography>
+              <Box sx={{ flexGrow: { xs: 1, sm: 0 } }}/>
+              <Box
+                sx={{
+                  minWidth: 80,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: { xs: 'flex-end', sm: 'flex-start' }
+                }}
+              >
+                {totalQuota === null ? (
+                  <Skeleton variant="text" width="100%" sx={{ fontSize: '0.875rem' }}/>
+                ) : (
+                  <Typography variant="body2" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                    {renderQuota(totalQuota, 2)}
+                  </Typography>
+                )}
+              </Box>
+            </Stack>
+          )}
+          <TablePagination
+            sx={{
+              '&.MuiTablePagination-root': {
+                ml: { xs: 0, sm: 'auto' },
+                width: { xs: '100%', sm: 'auto' },
+                minHeight: 'auto',
+                bgcolor: 'transparent',
+                borderTop: 0,
+                padding: 0
+              }
+            }}
+            page={page}
+            component="div"
+            count={listCount}
+            rowsPerPage={rowsPerPage}
+            onPageChange={handleChangePage}
+            rowsPerPageOptions={PAGE_SIZE_OPTIONS}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            showFirstButton
+            showLastButton
+          />
+        </Box>
       </Card>
     </>
   )

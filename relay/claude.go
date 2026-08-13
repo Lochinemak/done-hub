@@ -26,7 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var AllowChannelType = []int{config.ChannelTypeAnthropic, config.ChannelTypeVertexAI, config.ChannelTypeBedrock, config.ChannelTypeCustom, config.ChannelTypeGemini, config.ChannelTypeGeminiCli, config.ChannelTypeClaudeCode, config.ChannelTypeCodex, config.ChannelTypeAntigravity}
+var AllowChannelType = []int{config.ChannelTypeAnthropic, config.ChannelTypeVertexAI, config.ChannelTypeBedrock, config.ChannelTypeBedrockMessages, config.ChannelTypeCustom, config.ChannelTypeGemini, config.ChannelTypeGeminiCli, config.ChannelTypeClaudeCode, config.ChannelTypeCodex, config.ChannelTypeAntigravity, config.ChannelTypeDeepseek}
 
 type relayClaudeOnly struct {
 	relayBase
@@ -229,6 +229,12 @@ func CountTokenMessages(request *claude.ClaudeRequest, preCostType int) (int, er
 		return 0, nil
 	}
 
+	return countClaudeMessageTokens(request), nil
+}
+
+// countClaudeMessageTokens 计算 Claude 请求的输入 token，不受 PreCost 开关影响。
+// 供 CountTokenMessages（受 PreCost 控制）与超限守卫（需强制计数）复用。
+func countClaudeMessageTokens(request *claude.ClaudeRequest) int {
 	tokenEncoder := common.GetTokenEncoder(request.Model)
 
 	tokenNum := 0
@@ -259,7 +265,13 @@ func CountTokenMessages(request *claude.ClaudeRequest, preCostType int) (int, er
 		tokenNum += common.GetTokenNum(tokenEncoder, textMsg.String())
 	}
 
-	return tokenNum, nil
+	return tokenNum
+}
+
+// forcePromptTokens 强制计算输入 token（忽略 PreCost 开关），供超限守卫在
+// getPromptTokens 返回 0（渠道关闭预扣费）时使用，避免守卫被绕过。
+func (r *relayClaudeOnly) forcePromptTokens() int {
+	return countClaudeMessageTokens(r.claudeRequest)
 }
 
 // sendCustomChannelWithClaudeFormat 处理自定义渠道的Claude格式请求
@@ -1109,9 +1121,8 @@ func (r *relayClaudeOnly) convertOpenAIResponseToClaude(openaiResponse *types.Ch
 				Input: input,
 			})
 
-			// 计算工具调用的 tokens
-			toolCallText := fmt.Sprintf("tool_use:%s:%s", toolCall.Function.Name, toolCall.Function.Arguments)
-			toolCallTokens += common.CountTokenText(toolCallText, openaiResponse.Model)
+			// 计算工具调用的 tokens：口径与流式路径（handler 累积 name+args）对齐。
+			toolCallTokens += common.CountTokenText(toolCall.Function.Name+toolCall.Function.Arguments, openaiResponse.Model)
 		}
 	}
 
@@ -1192,9 +1203,6 @@ func (r *relayClaudeOnly) convertOpenAIStreamToClaude(stream requester.StreamRea
 
 	// 保存最后的 usage 信息，用于 EOF 时补发
 	var lastUsage map[string]interface{}
-
-	// 累积工具调用的 token 数（用于当上游不提供 usage 时的计算）
-	toolCallStatesForTokens := make(map[int]map[string]string) // 用于记录工具调用状态以便最后计算 tokens
 
 	safeClose := func() {
 		if !isClosed {
@@ -1325,9 +1333,6 @@ streamLoop:
 							if content != "" {
 								contentChunks++
 
-								// 累积文本内容到 TextBuilder 用于 token 计算
-								r.provider.GetUsage().TextBuilder.WriteString(content)
-
 								if !hasTextContentStarted && !hasFinished {
 									// 发送content_block_start事件（格式与demo一致）
 									contentBlockStartJSON := fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`, contentIndex)
@@ -1349,37 +1354,6 @@ streamLoop:
 						for _, toolCall := range toolCalls {
 							if toolCallMap, ok := toolCall.(map[string]interface{}); ok {
 								r.processToolCallDelta(toolCallMap, &contentIndex, flusher, processedInThisChunk, hasTextContentStarted, &isClosed, &hasFinished, toolCallStates, toolCallToContentIndex)
-
-								// 累积工具调用信息（在流结束时统一计算 tokens）
-								if function, funcExists := toolCallMap["function"].(map[string]interface{}); funcExists {
-									toolCallIndex := 0 // 需要从 toolCallMap 中获取 index
-									if idx, idxExists := toolCallMap["index"]; idxExists {
-										if idxFloat, ok := idx.(float64); ok {
-											toolCallIndex = int(idxFloat)
-										} else if idxInt, ok := idx.(int); ok {
-											toolCallIndex = idxInt
-										}
-									}
-
-									// 确保索引不为负数
-									if toolCallIndex < 0 {
-										toolCallIndex = 0
-									}
-
-									if toolCallStatesForTokens[toolCallIndex] == nil {
-										toolCallStatesForTokens[toolCallIndex] = map[string]string{
-											"name":      "",
-											"arguments": "",
-										}
-									}
-
-									if name, nameExists := function["name"].(string); nameExists {
-										toolCallStatesForTokens[toolCallIndex]["name"] = name
-									}
-									if args, argsExists := function["arguments"].(string); argsExists {
-										toolCallStatesForTokens[toolCallIndex]["arguments"] += args
-									}
-								}
 							}
 						}
 					}
@@ -1435,23 +1409,10 @@ streamLoop:
 						// 如果没有usage信息，计算工具调用和文本内容的 tokens
 						currentUsage := r.provider.GetUsage()
 
-						// 计算工具调用 tokens（在流结束时统一计算）
+						// content/reasoning/tool_call 均由 openai handler 的 GetResponseText 累积进 TextBuilder，此处据此估算
 						estimatedOutputTokens := 0
-						for _, toolCallState := range toolCallStatesForTokens {
-							if name, nameExists := toolCallState["name"]; nameExists {
-								args := toolCallState["arguments"]
-								if name != "" {
-									toolCallText := fmt.Sprintf("tool_use:%s:%s", name, args)
-									tokens := common.CountTokenText(toolCallText, r.modelName)
-									estimatedOutputTokens += tokens
-								}
-							}
-						}
-
-						// 累加文本内容的 tokens
 						if currentUsage.TextBuilder.Len() > 0 {
-							textTokens := common.CountTokenText(currentUsage.TextBuilder.String(), r.modelName)
-							estimatedOutputTokens += textTokens
+							estimatedOutputTokens = common.CountTokenText(currentUsage.TextBuilder.String(), r.modelName)
 						}
 
 						// 更新 Provider 的 Usage
@@ -1506,22 +1467,10 @@ streamLoop:
 						} else {
 							currentUsage := r.provider.GetUsage()
 
-							// 计算工具调用 tokens（在流结束时统一计算）
+							// content/reasoning/tool_call 均由 openai handler 的 GetResponseText 累积进 TextBuilder，此处据此估算
 							estimatedOutputTokens := 0
-							for _, toolCallState := range toolCallStatesForTokens {
-								if name, nameExists := toolCallState["name"]; nameExists {
-									args := toolCallState["arguments"]
-									if name != "" {
-										toolCallText := fmt.Sprintf("tool_use:%s:%s", name, args)
-										estimatedOutputTokens += common.CountTokenText(toolCallText, r.modelName)
-									}
-								}
-							}
-
-							// 累加文本内容的 tokens
 							if currentUsage.TextBuilder.Len() > 0 {
-								textTokens := common.CountTokenText(currentUsage.TextBuilder.String(), r.modelName)
-								estimatedOutputTokens += textTokens
+								estimatedOutputTokens = common.CountTokenText(currentUsage.TextBuilder.String(), r.modelName)
 							}
 
 							// 更新 Provider 的 Usage

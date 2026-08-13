@@ -30,9 +30,7 @@ import {
   Paper,
   Skeleton,
   Tooltip,
-  Alert,
-  Container,
-  ButtonGroup
+  Alert
 } from '@mui/material';
 import LoadingButton from '@mui/lab/LoadingButton';
 import { useTranslation } from 'react-i18next';
@@ -167,7 +165,8 @@ const ModelSelectorModal = ({ open, onClose, onConfirm, channelValues, prices })
         ...channelValues,
         models: '',
         model_mapping: '',
-        model_headers: ''
+        model_headers: '',
+        header_override: ''
       };
 
       if (isOpenAIMode) {

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"done-hub/common"
 	"done-hub/common/requester"
+	"done-hub/providers/base"
 	"done-hub/types"
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 // countImagesInResponse 统计响应中的图片数量
@@ -32,6 +35,7 @@ type GeminiRelayStreamHandler struct {
 	Usage     *types.Usage
 	Prefix    string
 	ModelName string
+	Context   *gin.Context
 
 	Key string
 }
@@ -56,7 +60,34 @@ func (p *GeminiProvider) CreateGeminiChat(request *GeminiChatRequest) (*GeminiCh
 	}
 
 	usage := p.GetUsage()
-	*usage = ConvertOpenAIUsage(geminiResponse.UsageMetadata)
+	// 上游 promptTokenCount 在中转链路里有时丢字段或为 0（中转商裁字段 / cache 命中等），
+	// 整对象赋值会把 RelayHandler 在 send 前填的本地预估 PromptTokens 一并抹掉，
+	// 导致消费日志记成 "0 in / N out"、平台漏收 input 部分费用。保留本地预估值兜底。
+	upstreamUsage := ConvertOpenAIUsageWithFallback(geminiResponse.UsageMetadata, geminiResponse)
+	if upstreamUsage.PromptTokens <= 0 && usage.PromptTokens > 0 {
+		upstreamUsage.PromptTokens = usage.PromptTokens
+	}
+	// total 兜底（max 逻辑，与流式 HandlerStream 对齐）：保证 total >= prompt + completion。
+	// 覆盖两种中转商裁字段模式：
+	//   - 只裁 prompt 留 total：upstream total 仍含真实 prompt，>= expected，不动
+	//   - prompt 和 total 一起裁：upstream total=0 或偏小，提升到 expected
+	if upstreamUsage.PromptTokens > 0 {
+		expected := upstreamUsage.PromptTokens + upstreamUsage.CompletionTokens
+		if upstreamUsage.TotalTokens < expected {
+			upstreamUsage.TotalTokens = expected
+		}
+	}
+	*usage = upstreamUsage
+
+	// 与 chat.go:ConvertToChatOpenai 的非流式兜底对齐：上游漏返/裁掉 usageMetadata 时 CompletionTokens
+	// 归零，用响应内容估算避免计费归零。原生非流式不走 ConvertToChatOpenai、也不写 TextBuilder，
+	// relay/main.go 的全局兜底靠 TextBuilder.Len()>0 覆盖不到，需在此单独兜底。
+	if usage.CompletionTokens == 0 {
+		if text := BillingPartsText(geminiResponse.Candidates); text != "" {
+			usage.CompletionTokens = common.CountTokenText(text, request.Model)
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+		}
+	}
 
 	return geminiResponse, nil
 }
@@ -74,6 +105,7 @@ func (p *GeminiProvider) CreateGeminiChatStream(request *GeminiChatRequest) (req
 		Usage:     p.Usage,
 		ModelName: request.Model,
 		Prefix:    `data: `,
+		Context:   p.Context,
 
 		Key: channel.Key,
 	}
@@ -116,19 +148,33 @@ func (h *GeminiRelayStreamHandler) HandlerStream(rawLine *[]byte, dataChan chan 
 		return
 	}
 
-	// 累积流式内容到 TextBuilder，用于 UsageMetadata 缺失或不准确时的 token 计算备用
-	for _, candidate := range geminiResponse.Candidates {
-		for _, part := range candidate.Content.Parts {
-			if part.Text != "" && !part.Thought {
-				h.Usage.TextBuilder.WriteString(part.Text)
+	// 统一请求响应模型：在剥离前缀的纯 JSON 上字节级改写 modelVersion / model 两个字段
+	// （gjson 读 + sjson 改，仅动这两个字段，其余字段顺序/内容不变），再回填到 rawStr，
+	// 保留其 data: 前缀与尾部。下游两个发送出口都复用改写后的 rawStr。
+	{
+		patched := noSpaceLine
+		for _, path := range []string{"modelVersion", "model"} {
+			if out, changed := base.UnifyModelInJSONBytes(h.Context, patched, path); changed {
+				patched = out
 			}
+		}
+		if !bytes.Equal(patched, noSpaceLine) {
+			rawStr = strings.Replace(rawStr, string(noSpaceLine), string(patched), 1)
 		}
 	}
 
+	// 累积流式内容到 TextBuilder，用于 UsageMetadata 缺失或不准确时的 token 计算备用（见 billingPartsText）。
+	h.Usage.TextBuilder.WriteString(BillingPartsText(geminiResponse.Candidates))
+
 	// 检查 UsageMetadata 是否为 nil 或所有字段都是 0（VertexAI 流式响应中间块只有 trafficType）
+	// 注意 PromptTokenCount/TotalTokenCount 可能被中转商裁掉，需要把 Candidates/Thoughts 也纳入判断，
+	// 否则上游只返回 output 部分时 hasValidUsage=false，CompletionTokens 会漏算（计费缺失）
 	hasValidUsage := false
 	if geminiResponse.UsageMetadata != nil &&
-		(geminiResponse.UsageMetadata.TotalTokenCount > 0 || geminiResponse.UsageMetadata.PromptTokenCount > 0) {
+		(geminiResponse.UsageMetadata.TotalTokenCount > 0 ||
+			geminiResponse.UsageMetadata.PromptTokenCount > 0 ||
+			geminiResponse.UsageMetadata.CandidatesTokenCount > 0 ||
+			geminiResponse.UsageMetadata.ThoughtsTokenCount > 0) {
 		hasValidUsage = true
 	}
 
@@ -145,7 +191,17 @@ func (h *GeminiRelayStreamHandler) HandlerStream(rawLine *[]byte, dataChan chan 
 		return
 	}
 
-	h.Usage.PromptTokens = geminiResponse.UsageMetadata.PromptTokenCount
+	// 上游 PromptTokenCount 可能为 0（中转商裁字段、cache 命中等）。
+	// 跟非流式 CreateGeminiChat 的兜底语义对齐：上游给 0 时不要覆盖掉
+	// RelayHandler 在 send 前填的本地预估值，否则消费日志会落成 "0 in / N out"。
+	if geminiResponse.UsageMetadata.PromptTokenCount > 0 {
+		h.Usage.PromptTokens = geminiResponse.UsageMetadata.PromptTokenCount
+	}
+
+	// 缓存命中 token：与 PromptTokens 一致取最后一个非零值，计费时按缓存倍率折算。
+	if geminiResponse.UsageMetadata.CachedContentTokenCount > 0 {
+		h.Usage.PromptTokensDetails.CachedTokens = geminiResponse.UsageMetadata.CachedContentTokenCount
+	}
 
 	// 计算 completion tokens，确保不为负数
 	completionTokens := geminiResponse.UsageMetadata.CandidatesTokenCount + geminiResponse.UsageMetadata.ThoughtsTokenCount
@@ -155,10 +211,18 @@ func (h *GeminiRelayStreamHandler) HandlerStream(rawLine *[]byte, dataChan chan 
 	h.Usage.CompletionTokens = completionTokens
 	h.Usage.CompletionTokensDetails.ReasoningTokens = geminiResponse.UsageMetadata.ThoughtsTokenCount
 
-	// 如果 TotalTokenCount 为 0 但有 PromptTokenCount，则计算总数
+	// total 兜底：保证 total >= prompt + completion（OpenAI 协议契约）。
+	// 允许 upstream total 比它大（reasoning 模型 thoughts 已计入 completion 不会偏大；
+	// 真大说明 upstream 有额外计费维度如 cache 包含在 prompt 里，信任 upstream 值不去动）。
+	// 这条同时覆盖了两种中转商裁字段模式：
+	//   - 只裁 prompt 留 total（total 仍含真实 prompt，>= expected，不改）
+	//   - prompt 和 total 一起裁（total=0 或偏小，提升到 expected）
 	totalTokens := geminiResponse.UsageMetadata.TotalTokenCount
-	if totalTokens == 0 && geminiResponse.UsageMetadata.PromptTokenCount > 0 {
-		totalTokens = geminiResponse.UsageMetadata.PromptTokenCount + completionTokens
+	if h.Usage.PromptTokens > 0 {
+		expected := h.Usage.PromptTokens + completionTokens
+		if totalTokens < expected {
+			totalTokens = expected
+		}
 	}
 	h.Usage.TotalTokens = totalTokens
 

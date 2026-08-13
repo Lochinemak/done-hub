@@ -3,22 +3,137 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
-const (
-	skipThoughtSignatureValidator = "skip_thought_signature_validator"
-	minThoughtSignatureLength     = 50
-)
+// 客户端 round-trip 回来的合法 Gemini thoughtSignature 是 base64 不透明值，长度 >> 50。
+// 用作判断"是否值得透传"的下限——更短的字符串大概率是损坏值或 Anthropic 的 thinking_signature
+// 混入，对官方 Gemini API 没有意义。
+const minThoughtSignatureLength = 50
+
+// StripCachedContentBytes 在字节层面剥掉根级 cachedContent / cached_content 字段。
+// 触发场景：上游回 "CachedContent not found (or permission denied)" 后剥掉再 retry，
+// 避免下一个渠道继续撞同样的 403。
+// camelCase 是 Gemini 官方 JSON 字段，snake_case 是部分 SDK 习惯写法，两个变体都剥。
+// 字节版用在 Gemini / VertexAI / VertexAIExpress 路径（chat.go 走 SetProcessedBodyBytes）。
+func StripCachedContentBytes(data []byte) []byte {
+	data, _ = sjson.DeleteBytes(data, "cachedContent")
+	data, _ = sjson.DeleteBytes(data, "cached_content")
+	return data
+}
+
+// StripCachedContentMap 是 StripCachedContentBytes 的 map 对偶。
+// GeminiCli / Antigravity 走的是 SetProcessedBody 的 map 缓存（不写 bytes 缓存），
+// 字节版剥不到，必须有这一份。delete on nil map 是 Go 语言层面 no-op，调用方不需要再判 nil。
+func StripCachedContentMap(m map[string]interface{}) {
+	delete(m, "cachedContent")
+	delete(m, "cached_content")
+}
+
+// SkipThoughtSignatureValidator 是 Google 官方文档列出的 thoughtSignature
+// 校验跳过哨兵之一（另一个是 context_engineering_is_the_way_to_go）。
+// 详见 https://ai.google.dev/gemini-api/docs/thought-signatures
+// "Escape Hatches for Missing Signatures" 一节。
+//
+// 仅在 retry / 跨 channel 切换场景下使用：原 channel 签发的签名在新 channel
+// 上无法识别 → 上游回 400 "Thought signature is not valid"。
+// 用此哨兵替换可绕过校验，代价是损失该 part 的 thinking reasoning 链。
+const SkipThoughtSignatureValidator = "skip_thought_signature_validator"
+
+// ThoughtSignatureInvalidMsg 是上游 400 错误信息中识别 thoughtSignature 校验失败
+// 的稳定子串，统一在此声明避免 relay 层硬编码。匹配时调用方应先 ToLower 再判子串，
+// 因为不同 backend 大小写不统一。
+//
+// 注意：判断"签名是否不可用"请统一走 IsThoughtSignatureFailure，不要直接 Contains
+// 这个常量——上游对同一语义有多种文案（见 thoughtSignatureFailureSignals），单串匹配会漏。
+const ThoughtSignatureInvalidMsg = "thought signature is not valid"
+
+// thoughtSignatureFailureSignals 收敛上游对 thoughtSignature "不可用"的各种文案。
+// 全部为小写子串，IsThoughtSignatureFailure 会先把 message ToLower 再匹配。
+//
+// 这些文案语义同类——客户端 history 携带的签名在当前 channel/account 上无法校验——
+// 补救手段也一致：ReplaceThoughtSignaturesBytes 把签名换成官方哨兵
+// skip_thought_signature_validator 后换渠道重试一次，因此不需要按文案区分处理。
+//   - "thought signature is not valid" : 原 channel 签发的签名在新 channel/key 上无法识别
+//   - "corrupted thought signature"    : 签名字节损坏/截断（2026-07 起在多 key 渠道高频出现）
+//   - "thought_signature is invalid"   : snake_case 变体，防御性纳入
+var thoughtSignatureFailureSignals = []string{
+	ThoughtSignatureInvalidMsg,
+	"corrupted thought signature",
+	"thought_signature is invalid",
+}
+
+// IsThoughtSignatureFailure 判断上游 message 是否属于"thoughtSignature 不可用"这一类
+// 可通过"剥签名换哨兵 + 换渠道重试"补救的错误。message 传原文即可，函数内部做 ToLower。
+func IsThoughtSignatureFailure(message string) bool {
+	msg := strings.ToLower(message)
+	for _, signal := range thoughtSignatureFailureSignals {
+		if strings.Contains(msg, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+// ReplaceThoughtSignaturesBytes 在字节层面把请求中所有 thoughtSignature 字段
+// 替换为 SkipThoughtSignatureValidator 哨兵字符串。
+//
+// 使用 gjson 找到所有匹配路径、sjson 批量替换，零反序列化、对含 base64 图片的
+// 大 body 同样安全。
+//
+// 仅应在 retry 时调用：首次请求必须完整透传客户端给出的签名，否则会主动降级
+// 所有用户的 thinking 体验。
+//
+// 返回值：替换后的 bytes，以及实际替换的字段数量（0 表示请求里本来就没有
+// thoughtSignature，此时调用方可跳过后续逻辑）。
+func ReplaceThoughtSignaturesBytes(data []byte) ([]byte, int) {
+	if len(data) == 0 {
+		return data, 0
+	}
+
+	contents := gjson.GetBytes(data, "contents")
+	if !contents.Exists() {
+		return data, 0
+	}
+
+	replaced := 0
+	for i, content := range contents.Array() {
+		parts := content.Get("parts")
+		if !parts.Exists() {
+			continue
+		}
+		for j, part := range parts.Array() {
+			sig := part.Get("thoughtSignature")
+			if !sig.Exists() {
+				continue
+			}
+			// 已经是哨兵则跳过，避免二次调用时 replaced 数字虚高、混淆日志。
+			// 这一情况只可能出现在调用方在同一请求生命周期内多次调用本函数；
+			// retry 链路里 shouldRetryBadRequest 通过 thought_signature_retried
+			// 标志保证最多调一次，所以这是防御性的——但比"靠 retried 标志间接保证"
+			// 更稳，本函数自身是幂等的。
+			if sig.Type == gjson.String && sig.String() == SkipThoughtSignatureValidator {
+				continue
+			}
+			path := fmt.Sprintf("contents.%d.parts.%d.thoughtSignature", i, j)
+			if newData, err := sjson.SetBytes(data, path, SkipThoughtSignatureValidator); err == nil {
+				data = newData
+				replaced++
+			}
+		}
+	}
+	return data, replaced
+}
 
 // CleanGeminiRequestBytes 在字节层面清理 Gemini 请求数据中的不兼容字段
 // 使用 gjson/sjson 直接操作字节，避免对含 base64 图片的大请求做完整 json.Unmarshal/Marshal
 func CleanGeminiRequestBytes(data []byte, isVertexAI bool) ([]byte, error) {
 	var err error
 
-	// 单次遍历完成 contents 的所有清洗（原 step 1/2/3/5 合并）
+	// 单次遍历完成 contents 的所有清洗（原 step 1/2/3 合并）
 	data, err = cleanContentsBytes(data)
 	if err != nil {
 		return nil, err
@@ -48,11 +163,16 @@ type setRawOp struct {
 // cleanContentsBytes 单次遍历完成所有 contents 清洗
 // Collect-Then-Apply 模式：一次 gjson.GetBytes 解析，收集所有变更路径，最后批量 sjson 写入
 //
-// 合并了以下四个原独立函数：
+// 合并了以下三个原独立函数：
 //   - validateAndFixFunctionCallSequenceBytes（step 1）
 //   - deleteFunctionIdsBytes（step 2）
 //   - ensureContentRolesBytes（step 3）
-//   - ensureThoughtSignaturesBytes（step 5）
+//
+// 历史上还有 step 5：给缺失 thoughtSignature 的 model functionCall part 注入哨兵值
+// "skip_thought_signature_validator"。该哨兵仅对 Antigravity 网关有效，官方 Gemini / Vertex
+// 会判定为非法签名并返回 400 INVALID_ARGUMENT。Antigravity 路径在
+// providers/antigravity/chat.go 中有自己的 applyThinkingSignatureSentinel 注入，
+// 因此此处不再统一注入；客户端提供的合法签名按原样透传。
 func cleanContentsBytes(data []byte) ([]byte, error) {
 	contents := gjson.GetBytes(data, "contents")
 	if !contents.Exists() {
@@ -66,7 +186,7 @@ func cleanContentsBytes(data []byte) ([]byte, error) {
 	var pathsToDelete []string
 	var pathsToSet []setOp
 	var pathsToSetRaw []setRawOp
-	fixedTurns := make(map[int]bool) // step1 整体替换 parts 的 turn，step2/5 跳过其 parts
+	fixedTurns := make(map[int]bool) // step1 整体替换 parts 的 turn，step2 跳过其 parts
 
 	for i := 0; i < n; i++ {
 		content := contentsArr[i]
@@ -97,14 +217,14 @@ func cleanContentsBytes(data []byte) ([]byte, error) {
 				if next.Get("role").String() != "model" {
 					if fix := buildFunctionCallFix(callNames, next, i+1); fix != nil {
 						pathsToSetRaw = append(pathsToSetRaw, *fix)
-						fixedTurns[i+1] = true // 标记：该 turn 的 parts 将被整体替换，step2/5 跳过
+						fixedTurns[i+1] = true // 标记：该 turn 的 parts 将被整体替换，step2 跳过
 					}
 				}
 			}
 		}
 
-		// ── Steps 2 & 5: 遍历 parts ──
-		// 跳过被 step1 整体替换 parts 的 turn（收集的 id/thoughtSignature 路径会被覆盖）
+		// ── Step 2: 遍历 parts 删除 functionCall/functionResponse 的 id ──
+		// 跳过被 step1 整体替换 parts 的 turn（收集的 id 路径会被覆盖）
 		if fixedTurns[i] {
 			continue
 		}
@@ -115,35 +235,17 @@ func cleanContentsBytes(data []byte) ([]byte, error) {
 		}
 
 		for j, part := range parts.Array() {
-			// Step 2: 收集 functionCall/functionResponse 中的 id 字段路径
 			for _, field := range []string{"functionCall", "function_call", "functionResponse", "function_response"} {
 				if part.Get(field + ".id").Exists() {
 					pathsToDelete = append(pathsToDelete,
 						fmt.Sprintf("contents.%d.parts.%d.%s.id", i, j, field))
 				}
 			}
-
-			// Step 5: 确保 model 角色的 thought/functionCall part 有 thoughtSignature
-			if role == "model" {
-				needsSignature := part.Get("thought").Bool() ||
-					part.Get("functionCall").Exists() ||
-					part.Get("function_call").Exists()
-
-				if needsSignature {
-					sig := part.Get("thoughtSignature")
-					if !sig.Exists() || len(sig.String()) < minThoughtSignatureLength {
-						pathsToSet = append(pathsToSet, setOp{
-							path:  fmt.Sprintf("contents.%d.parts.%d.thoughtSignature", i, j),
-							value: skipThoughtSignatureValidator,
-						})
-					}
-				}
-			}
 		}
 	}
 
 	// ── Batch Apply：批量执行所有变更 ──
-	// 执行顺序：SetRaw（step1 整体替换 parts）→ Delete（step2 删 id）→ Set（step3 role + step5 sig）
+	// 执行顺序：SetRaw（step1 整体替换 parts）→ Delete（step2 删 id）→ Set（step3 role）
 	var err error
 
 	for _, op := range pathsToSetRaw {

@@ -6,6 +6,7 @@ import TableBody from '@mui/material/TableBody'
 import TableContainer from '@mui/material/TableContainer'
 import PerfectScrollbar from 'react-perfect-scrollbar'
 import TablePagination from '@mui/material/TablePagination'
+import TableSortLabel from '@mui/material/TableSortLabel'
 import LinearProgress from '@mui/material/LinearProgress'
 import ButtonGroup from '@mui/material/ButtonGroup'
 import Toolbar from '@mui/material/Toolbar'
@@ -20,9 +21,11 @@ import { getPageSize, PAGE_SIZE_OPTIONS, savePageSize } from 'constants'
 import EditeModal from './component/EditModal'
 
 import { useTranslation } from 'react-i18next'
+import useStickyShadow from 'hooks/useStickyShadow'
 // ----------------------------------------------------------------------
 export default function Users() {
   const { t } = useTranslation()
+  const stickyShadowRef = useStickyShadow()
   const [page, setPage] = useState(0)
   const [order, setOrder] = useState('desc')
   const [orderBy, setOrderBy] = useState('id')
@@ -113,8 +116,15 @@ export default function Users() {
       case 'status':
         valueData = { user_id: userId, action: value === 1 ? 'enable' : 'disable' }
         break
-      case 'role':
-        valueData = { user_id: userId, action: value === true ? 'promote' : 'demote' }
+      case 'set_role':
+        // value 是目标角色：1=普通用户, 3=可信内部员工, 10=管理员
+        if (value === 1) {
+          valueData = { user_id: userId, action: 'demote' }
+        } else if (value === 3) {
+          valueData = { user_id: userId, action: 'set_reliable' }
+        } else if (value === 10) {
+          valueData = { user_id: userId, action: 'promote' }
+        }
         break
       case 'quota':
         url = `/api/user/quota/${userId}`
@@ -196,7 +206,7 @@ export default function Users() {
           </Container>
         </Toolbar>
         {searching && <LinearProgress/>}
-        <PerfectScrollbar component="div">
+        <PerfectScrollbar component="div" containerRef={stickyShadowRef}>
           <TableContainer sx={{ overflow: 'unset' }}>
             <Table sx={{ minWidth: 800 }}>
               <KeywordTableHead
@@ -207,14 +217,48 @@ export default function Users() {
                   { id: 'id', label: t('userPage.id'), disableSort: false },
                   { id: 'username', label: t('userPage.username'), disableSort: false },
                   { id: 'group', label: t('userPage.group'), disableSort: true },
-                  { id: 'stats', label: t('userPage.statistics'), disableSort: true },
+                  {
+                    id: 'stats',
+                    disableSort: true,
+                    label: (
+                      <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="center">
+                        <span>{t('userPage.statistics')}：</span>
+                        <TableSortLabel
+                          hideSortIcon
+                          active={orderBy === 'quota'}
+                          direction={orderBy === 'quota' ? order : 'asc'}
+                          onClick={(e) => handleSort(e, 'quota')}
+                        >
+                          {t('userPage.remainingShort')}
+                        </TableSortLabel>
+                        <span style={{ opacity: 0.4 }}>/</span>
+                        <TableSortLabel
+                          hideSortIcon
+                          active={orderBy === 'used_quota'}
+                          direction={orderBy === 'used_quota' ? order : 'asc'}
+                          onClick={(e) => handleSort(e, 'used_quota')}
+                        >
+                          {t('userPage.usedShort')}
+                        </TableSortLabel>
+                        <span style={{ opacity: 0.4 }}>/</span>
+                        <TableSortLabel
+                          hideSortIcon
+                          active={orderBy === 'request_count'}
+                          direction={orderBy === 'request_count' ? order : 'asc'}
+                          onClick={(e) => handleSort(e, 'request_count')}
+                        >
+                          {t('userPage.requestCountShort')}
+                        </TableSortLabel>
+                      </Stack>
+                    )
+                  },
                   { id: 'role', label: t('userPage.userRole'), disableSort: false },
                   { id: 'bind', label: t('userPage.bind'), disableSort: true },
                   { id: 'created_time', label: t('userPage.creationTime'), disableSort: false },
                   { id: 'last_login_time', label: t('userPage.lastLoginTime'), disableSort: false },
                   { id: 'last_login_ip', label: t('userPage.lastLoginIP'), disableSort: false },
                   { id: 'status', label: t('userPage.status'), disableSort: false },
-                  { id: 'action', label: t('userPage.action'), disableSort: true }
+                  { id: 'action', label: t('userPage.action'), disableSort: true, sticky: true }
                 ]}
               />
               <TableBody>

@@ -26,6 +26,7 @@
     "checkUpdates": "檢查更新",
     "dataFormatIncorrect": "數據格式不正確",
     "fetchData": "獲取數據",
+    "fetchFromModelsDev": "從 models.dev 獲取",
     "inputMultiplierChanged": "輸入倍率由",
     "newModels": "新增模型",
     "noNewModels": "沒有新增模型",
@@ -42,13 +43,19 @@
     "to": "變為",
     "url": "URL",
     "priceServerTotal": "價格服務器總數",
-    "overwriteData": "",
+    "overwriteData": "覆蓋數據",
     "added": "新增",
     "extraRatiosAdded": "新增擴展倍率",
     "extraRatiosChanged": "擴展倍率變化",
     "extraRatiosChanges": "擴展倍率變動",
     "extraRatiosChangesTip": "擴展倍率變動：{{changes}}",
     "extraRatiosRemoved": "刪除擴展倍率",
+    "longContextAdded": "新增長上下文分檔",
+    "longContextRemoved": "刪除長上下文分檔",
+    "longContextChanged": "長上下文分檔變化",
+    "longContextThreshold": "閾值",
+    "longContextInput": "輸入倍率",
+    "longContextOutput": "輸出倍率",
     "modified": "修改",
     "removed": "刪除"
   },
@@ -63,6 +70,16 @@
     "loadingError": "加載關於內容失敗...",
     "projectRepo": "項目倉庫地址："
   },
+  "userAgreement": {
+    "title": "用戶協議",
+    "emptyDescription": "管理員尚未配置用戶協議內容。",
+    "loadingError": "加載用戶協議內容失敗..."
+  },
+  "privacyPolicy": {
+    "title": "隱私政策",
+    "emptyDescription": "管理員尚未配置隱私政策內容。",
+    "loadingError": "加載隱私政策內容失敗..."
+  },
   "alloy 映射": "alloy 映射",
   "analytics": "分析",
   "plauground": "聊天",
@@ -71,6 +88,8 @@
     "averageLatency": "平均延遲",
     "channelCount": "渠道數量",
     "consumptionStatistics": "消費統計",
+    "costStatistics": "成本統計",
+    "profitStatistics": "利潤統計",
     "directRegistration": "直接註冊",
     "disabled": "禁用",
     "endTime": "結束時間",
@@ -83,6 +102,9 @@
     "testDisabled": "測試禁用",
     "tokensStatistics": "Tokens統計",
     "totalUserBalance": "用戶總餘額",
+    "totalUsedQuota": "總消耗",
+    "totalRequestCount": "請求總次數",
+    "totalTokens": "請求總Token",
     "totalUserSpending": "用戶總消費金額",
     "totalUsers": "用戶總數",
     "unused": "未使用",
@@ -92,7 +114,17 @@
     "order": "訂單",
     "realTimeTraffic": "實時流量",
     "tpmDescription": "TPM (Token/分鐘)",
-    "last60SecondsStats": "最近60秒統計"
+    "cpmDescription": "CPM",
+    "ppmDescription": "PPM",
+    "last60SecondsStats": "最近60秒統計",
+    "autoRefresh": "自動",
+    "timeFilter": {
+      "all": "全部",
+      "day": "今日",
+      "month": "本月",
+      "week": "本週",
+      "year": "本年"
+    }
   },
   "auth": {
     "invalidLink": "無效的鏈接",
@@ -113,6 +145,15 @@
     "batchKeytip": "，一行一個密鑰",
     "customModelTip": "自定義：點擊或回車輸入",
     "editSuccess": "更新成功！",
+    "tagGroupOverwriteWarning": "此標籤下共 {{count}} 個渠道，儲存後將以相同設定覆蓋全部 {{count}} 個渠道（各自的 Key 除外）。",
+    "tagGroupSaveConfirmTitle": "確認覆蓋分組設定",
+    "tagGroupSaveConfirmContent": "儲存後將以目前設定覆蓋標籤「{{tag}}」下全部 {{count}} 個渠道（各自的 Key 除外）。確定繼續嗎？",
+    "tagBulkFieldConfirmTitle": "確認批次修改",
+    "tagBulkFieldConfirmContent": "此操作會將標籤「{{tag}}」下全部 {{count}} 個渠道的「{{field}}」統一設為 {{value}}。確定繼續嗎？",
+    "tagMemberSectionTitle": "組成員（每個 Key 對應一個渠道）",
+    "tagMemberKeysLabel": "成員 Key 列表",
+    "tagMemberKeysHelper": "每行一個 Key，對應組內一個渠道；新增行將建立渠道，刪除行將移除對應渠道。各渠道的 Key 不會被共享設定覆蓋。",
+    "joinExistingTagWarning": "標籤「{{tag}}」已存在（{{count}} 個渠道）。儲存後此渠道將加入該分組，之後對該分組的統一編輯會覆蓋其設定。",
     "inputAllModel": "填入所有模型",
     "inputChannelModel": "填入渠道支持模型",
     "invalidJson": "無效的JSON",
@@ -132,6 +173,9 @@
     "validJson": "必須是有效的JSON字符串",
     "collapse": "收起",
     "expand": "展開",
+    "sectionBasic": "基礎配置",
+    "sectionAdvanced": "進階設定",
+    "sectionBilling": "計費與行為",
     "copyModels": "複製模型",
     "mapAdd": "新增{{name}}",
     "mapAddByJson": "透過 JSON 添加{{name}}",
@@ -153,7 +197,32 @@
     "removePrefix": "刪除前缀",
     "removeSuffix": "刪除後缀",
     "collapseList": "收起列表",
-    "expandList": "展開列表"
+    "expandList": "展開列表",
+    "tagMembersTitle": "組內共 {{count}} 個成員渠道",
+    "tagMembersHint": "各成員的 Key 相互獨立、不受共享配置影響；如需增刪成員，請在列表中展開該標籤行逐個管理。",
+    "baseUrl": "API地址",
+    "existingModels": "已選模型",
+    "fetchModels": "獲取模型",
+    "invertSelection": "反選",
+    "invertSelectionTooltip": "反轉當前選擇",
+    "modelSelector": "模型選擇器",
+    "noMatchingModels": "沒有匹配的模型",
+    "noModels": "沒有模型",
+    "openaiBaseUrlTip": "請輸入OpenAI格式的API地址，例如：https://api.openai.com",
+    "openaiMode": "切換OpenAI格式獲取模型",
+    "searchModels": "搜索模型",
+    "selectAll": "全選",
+    "selectAllTooltip": "選擇全部模型",
+    "selectedCount": "已選{{count}}個模型",
+    "clearModels": "重置",
+    "clearModelsTip": "重置所有已選擇的模型",
+    "clearSearch": "清除",
+    "convertToLowercase": "模型名稱轉小寫",
+    "filterMappedModels": "不填充映射前的模型名稱",
+    "overwriteMappings": "覆蓋原有映射關係",
+    "overwriteMappingsTip": "啟用後將清空原有的映射關係，僅保留此次創建的映射",
+    "overwriteModels": "覆蓋原有模型列表",
+    "overwriteModelsTip": "啟用後將清空原有的模型列表，僅保留此次選擇的模型"
   },
   "channel_index": {
     "AzureApiVersion": "Azure 版本號",
@@ -204,7 +273,67 @@
     "updateEnabledBalance": "更新啟用餘額",
     "usedBalance": "已使用/餘額",
     "weight": "權重",
-    "onlyTags": "僅顯示標籤"
+    "costRatio": "成本倍率",
+    "onlyTags": "僅顯示標籤",
+    "tagFilter": "標籤篩選",
+    "noTagOnly": "僅未分組",
+    "batchAddUserGroup": "批量添加用戶分組",
+    "batchAddUserGroupTip": "選擇渠道並添加用戶分組。如果渠道已有該分組，將跳過該渠道。",
+    "searchChannelPlaceholder": "輸入渠道名稱搜索（留空獲取所有渠道）",
+    "searchChannelLabel": "搜索渠道",
+    "noMatchingChannels": "未找到匹配的渠道",
+    "clickSearchToGetChannels": "請點擊搜索按鈕獲取渠道列表",
+    "selectedChannelsCount": "已選擇 {{selected}} / {{total}} 個渠道",
+    "channelAlreadyHasGroup": "（已有該分組）",
+    "currentGroup": "當前分組",
+    "noGroup": "無",
+    "selectUserGroupToAdd": "選擇要添加的用戶分組",
+    "pleaseSelectUserGroup": "請選擇用戶分組",
+    "pleaseSelectChannelsForUserGroup": "請選擇至少一個渠道",
+    "addingUserGroup": "添加中...",
+    "addUserGroupToChannels": "為 {{count}} 個渠道添加用戶分組",
+    "batchAddUserGroupSuccess": "成功為 {{count}} 個渠道添加用戶分組 \"{{group}}\"",
+    "batchAddModel": "批量添加模型",
+    "batchAddModelTip": "選擇渠道並添加模型。支持輸入多個模型。如果渠道已有某個模型，將跳過該模型。",
+    "selectModelToAdd": "選擇或輸入要添加的模型",
+    "pleaseSelectModel": "請選擇或輸入模型",
+    "pleaseSelectChannelsForModel": "請選擇至少一個渠道",
+    "channelAlreadyHasAllModels": "（已有全部所選模型）",
+    "currentModels": "當前模型",
+    "noModels": "無",
+    "addingModel": "添加中...",
+    "addModelToChannels": "為 {{count}} 個渠道添加模型",
+    "batchAddModelSuccess": "成功為 {{count}} 個渠道添加模型 \"{{model}}\"",
+    "modelInputTip": "支持輸入多個模型，用逗號分隔",
+    "loadingChannels": "正在加載渠道列表...",
+    "previousPage": "上一頁",
+    "nextPage": "下一頁",
+    "pageInfo": "第 {{page}} / {{total}} 頁",
+    "selectionStatus": "已選 {{selected}}（本頁 {{onPage}}）/ 本頁 {{count}} 條 / 共匹配 {{total}} 條",
+    "selectionStatusFiltered": "已選 {{selected}}（本頁 {{onPage}}）/ 本頁嚴格匹配 {{count}} 條 / 服務器粗篩 {{total}} 條",
+    "selectCurrentPage": "全選本頁",
+    "unselectCurrentPage": "取消本頁",
+    "clearSelection": "清空選中",
+    "clearKeyword": "清除關鍵字",
+    "channelOnlyHasThisModel": "（僅剩此模型，無法刪除）",
+    "channelAlreadyHasPartialModels": "（部分模型已存在）",
+    "batchDeleteTipV2": "搜索時使用模糊匹配，列表中已按完整模型名嚴格篩選。若渠道只剩此一個模型則不可刪除，避免清空。",
+    "batchAzureAPITip": "選擇 Azure 類型的渠道並替換 API 版本號。先輸入當前版本號進行搜索（留空則查詢全部 Azure 渠道），再輸入新版本號執行替換。",
+    "currentAzureAPIVersion": "當前版本",
+    "newAzureAPIVersion": "新版本",
+    "replaceAzureAPIVersion": "替換 {{count}} 個渠道的 API 版本",
+    "replacing": "替換中...",
+    "confirmDeleteModel": "從 {{count}} 個渠道中刪除模型 \"{{model}}\"",
+    "deleting": "刪除中...",
+    "modelToDelete": "要刪除的模型名（完整匹配）",
+    "delModelEmptyHint": "請在上方輸入要刪除的模型名後按 Enter 搜索匹配渠道",
+    "azureApiSearchPlaceholder": "輸入要查找的 API 版本（留空查詢全部 Azure 渠道）",
+    "batchDeleteChannels": "批量刪除渠道",
+    "batchDeleteChannelsConfirm": "確定要刪除選中的 {{count}} 個渠道嗎？此操作不可撤銷。",
+    "batchDeleteChannelsSuccess": "成功刪除 {{count}} 個渠道",
+    "deleteChannels": "刪除渠道",
+    "pleaseSelectChannels": "請先選擇要刪除的渠道",
+    "channelApiAddress": "渠道API地址"
   },
   "channel_row": {
     "auto": "自動",
@@ -262,15 +391,44 @@
     "tagChannelsSuccess": "標籤渠道{{action}}成功",
     "weightUpdateError": "權重更新失敗: {{message}}",
     "weightUpdateSuccess": "權重更新成功",
+    "costRatioUpdateSuccess": "成本倍率更新成功",
+    "costRatioUpdateError": "成本倍率更新失敗: {{message}}",
+    "rowsPerPage": "每頁行數:",
+    "paginationDisplayedRows": "{{from}}-{{to}} 共 {{count}}",
+    "groupPriority": "優先級(整組)",
+    "groupPriorityTip": "套用於該標籤下全部渠道",
+    "groupWeight": "組權重",
+    "groupWeightTip": "套用於該標籤下全部渠道",
+    "groupCostRatio": "組倍率",
+    "groupCostRatioTip": "套用於該標籤下全部渠道",
+    "groupCount": "共 {{count}}",
+    "groupEnabled": "{{count}} 啟用",
+    "groupDisabled": "{{count}} 停用",
+    "expandGroup": "展開渠道列表",
+    "collapseGroup": "收起渠道列表",
+    "avgLabel": "平均",
+    "sumLabel": "合計",
+    "groupStatusSummary": "{{count}} 個渠道 · {{enabled}} 啟用 / {{disabled}} 停用",
+    "mixed": "混合",
+    "mixedTip": "該標籤下渠道的類型/分組不一致；分組統一編輯會將整組覆蓋為同一項",
     "key": "密鑰",
-    "keyRequired": "請輸入密鑰"
+    "keyRequired": "請輸入密鑰",
+    "wholeGroup": "整組",
+    "groupPriorityLabel": "優先級·組",
+    "groupWeightLabel": "權重·組",
+    "groupCostRatioLabel": "倍率·組"
   },
   "common": {
     "again": "重試 ({{count}})",
+    "languageSwitchPrompt": "偵測到您的瀏覽器語言為{{language}}，是否切換為{{language}}？",
+    "languageSwitchConfirm": "切換",
+    "languageSwitchDismiss": "暫不",
     "back": "返回",
     "bindOk": "綁定成功！",
     "cancel": "取消",
     "close": "關閉",
+    "collapse": "收起側欄",
+    "expand": "展開側欄",
     "copyUrl": "複製地址",
     "create": "創建",
     "delete": "刪除",
@@ -306,9 +464,22 @@
     "action": "操作",
     "actions": "操作",
     "noDataAvailable": "冇數據可用",
+    "noSearchResults": "冇符合嘅搜尋結果",
     "pageSize": "每頁條數",
     "search": "搜尋",
-    "total": "總數"
+    "searchFilters": "搜尋條件",
+    "total": "總數",
+    "quotaInput": {
+      "equivalentTokens": "≈ {{tokens}} tokens",
+      "equivalentMoney": "≈ {{amount}}",
+      "precisionHint": "將四捨五入為 {{tokens}} tokens",
+      "toggleToCurrency": "按美元輸入",
+      "toggleToToken": "按 token 數輸入",
+      "overDeductLimit": "⚠ 超出可扣除上限（{{max}}）"
+    },
+    "loading": "加載中...",
+    "currency": "USD",
+    "reset": "重置"
   },
   "dashboard": "儀表板",
   "dashboard_index": {
@@ -345,7 +516,8 @@
     "availability": "可用率",
     "tab_status": "狀態",
     "tab_dashboard": "儀表板",
-    "title": "儀表板"
+    "title": "儀表板",
+    "week_total_consumption": "本週總消費"
   },
   "description": "一站式的 OpenAI 接口\n整合各種 API 訪問方式\n一鍵部署，開箱即用",
   "echo 映射": "echo 映射",
@@ -360,7 +532,66 @@
     "sourceCode": "源代碼遵循"
   },
   "home": {
-    "loadingErr": "加載首頁內容失敗..."
+    "loadingErr": "加載首頁內容失敗...",
+    "hero": {
+      "title": "所有模型，一個介面",
+      "subtitle": "聚合 OpenAI、Claude、Gemini、DeepSeek 等數十家模型供應商，統一為 OpenAI 相容介面。替換 base_url 即可接入，金鑰、計費與日誌集中管理。",
+      "getStarted": "開始使用",
+      "console": "進入控制台",
+      "viewPricing": "查看價格"
+    },
+    "stats": {
+      "channels": "通道類型",
+      "protocols": "原生協議",
+      "openSource": "完全開源"
+    },
+    "code": {
+      "title": "三種協議，同一入口",
+      "subtitle": "OpenAI、Claude、Gemini 協議原生轉發，不作改寫。",
+      "reply": "你好,我是 {{model}},經 Done Hub 接入。"
+    },
+    "providers": {
+      "title": "覆蓋數十家模型供應商",
+      "subtitle": "海內外主流模型均已接入，統一為 OpenAI 相容格式，新供應商持續更新。"
+    },
+    "features": {
+      "title": "不止於接入",
+      "subtitle": "通道調度、計費分組、用量日誌、客戶端接入，集中在同一套後台。",
+      "items": {
+        "routing": {
+          "title": "通道調度",
+          "desc": "按優先級與權重分配流量，異常自動切換並冷卻恢復。"
+        },
+        "billing": {
+          "title": "計費分組",
+          "desc": "令牌、使用者組、定價、額度、帳單，成本可追溯。"
+        },
+        "observability": {
+          "title": "日誌用量",
+          "desc": "RPM／TPM、消費明細、請求日誌，可按使用者統計匯出。"
+        },
+        "clients": {
+          "title": "客戶端接入",
+          "desc": "Claude Code、Gemini CLI、Codex 等客戶端直接指向，按原生協議轉發。"
+        }
+      }
+    },
+    "howItWorks": {
+      "title": "四步完成接入",
+      "subtitle": "從部署到客戶端接入，對應真實的請求路徑。",
+      "s1Title": "部署",
+      "s1Desc": "用 Docker 啟動 Done Hub，完成基礎配置。",
+      "s2Title": "配置通道",
+      "s2Desc": "啟用 OpenAI、Claude、Gemini 等通道，填入上游金鑰。",
+      "s3Title": "接入客戶端",
+      "s3Desc": "OpenAI 用 /v1，Claude 用 /claude/v1，Gemini 用 /gemini。",
+      "s4Title": "營運",
+      "s4Desc": "查看儀表板與日誌，管理計費與通道狀態。"
+    },
+    "cta": {
+      "title": "完全開源，歡迎 Star 與貢獻",
+      "github": "前往 GitHub"
+    }
   },
   "inviteCard": {
     "copyButton": {
@@ -438,6 +669,7 @@
     "exporting": "導出中...",
     "exportSuccess": "導出成功",
     "exportError": "導出失敗",
+    "totalCost": "總消費",
     "searchLogsInfo": "充值記錄以及邀請記錄請在日誌中查詢。充值記錄請在日誌中選擇類型【充值】查詢；邀請記錄請在日誌中選擇【系統】查詢",
     "timeLabel": "時間",
     "title": "日誌",
@@ -447,6 +679,9 @@
     "typeLabel": "類型",
     "userLabel": "用戶",
     "sourceIp": "Source IP",
+    "requestId": "請求ID",
+    "upstreamRequestId": "上游請求ID",
+    "requestIdentifier": "請求識別符",
     "logType": {
       "all": "全部",
       "recharge": "充值",
@@ -476,18 +711,26 @@
       "outputPrice": "輸出價格",
       "groupRatio": "分組倍率",
       "groupRatioValue": "分組倍率",
+      "longContextRatio": "長上下文倍率",
       "actualPrice": "實際價格",
       "input": "輸入",
       "output": "輸出",
       "finalCalculation": "最終計算",
       "originalBilling": "原始計費",
       "actualBilling": "實際計費",
+      "cost": "成本",
+      "profit": "利潤",
       "calculationNote": "PS：本系統按照積分計算，所有金額均為積分換算而來，1積分=$0.000002，最低消費為1積分，本計算步驟僅供參考，以實際扣費為準。",
       "times": "倍"
     },
     "cachedReadTokens": "緩存讀取Tokens (* {{ ratio }})",
     "reasoningTokens": "推理Tokens (* {{ ratio }})",
-    "cachedWriteTokens": "緩存寫入 Tokens (* {{ ratio }})"
+    "cachedWriteTokens": "緩存寫入 Tokens (* {{ ratio }})",
+    "cachedWrite1hTokens": "緩存寫入(1h) Tokens (* {{ ratio }})",
+    "openaiCacheWriteTokens": "緩存寫入 Tokens(OpenAI) (* {{ ratio }})",
+    "inputImageTokens": "輸入圖像Tokens (* {{ ratio }})",
+    "outputImageTokens": "輸出圖像Tokens (* {{ ratio }})",
+    "unknown": "未知"
   },
   "login": {
     "codeRequired": "驗證碼不能為空",
@@ -511,7 +754,11 @@
     "usernameRequired": "用戶名/電郵為必填項",
     "wechatLoginInfo": "請使用微信掃描二維碼關注公眾號，輸入「驗證碼」獲取驗證碼（有效期三分鐘）",
     "wechatVerificationCodeLogin": "微信驗證碼登錄",
-    "useLinuxDoLogin": "使用 LINUX DO 登入"
+    "useLinuxDoLogin": "使用 LINUX DO 登入",
+    "linuxDoCountError": "出現錯誤，第 {{count}} 次重試中...",
+    "linuxDoError": "操作失敗，重定向至登錄界面中...",
+    "linuxDoLogin": "LINUX DO 登錄",
+    "loggingIn": "登錄中..."
   },
   "menu": {
     "about": "關於",
@@ -522,7 +769,10 @@
     "signout": "登出",
     "signup": "註冊",
     "unknownVersion": "未知版本",
-    "welcomeBack": "歡迎回來"
+    "welcomeBack": "歡迎回來",
+    "userAgreement": "用戶協議",
+    "privacyPolicy": "隱私政策",
+    "status": "狀態"
   },
   "midjourneyPage": {
     "channel": "渠道",
@@ -555,6 +805,7 @@
     "modelName": "模型名稱",
     "noneGroup": "當前分組不可用",
     "outputMultiplier": "輸出價格",
+    "timesPrice": "單次價格",
     "search": "搜尋",
     "times": "按次付費",
     "tokens": "按量付費",
@@ -567,7 +818,9 @@
     "free": "免費",
     "cached_tokens": "快取倍率",
     "cached_write_tokens": "快取寫入倍率",
+    "cached_write_1h_tokens": "快取寫入(1h)倍率",
     "cached_read_tokens": "快取讀取倍率",
+    "openai_cache_write_tokens": "OpenAI快取寫入倍率",
     "reasoning_tokens": "推理倍率",
     "input_text_tokens": "輸入文本倍率",
     "output_text_tokens": "輸出文本倍率",
@@ -595,6 +848,10 @@
     "priceDetails": "價格明細",
     "priceNote": "不同分組,對應的價格也隨之不同,渠道組需要在令牌管理中切換。",
     "otherInfo": "其他資訊",
+    "longContext": "長上下文計費",
+    "shortContext": "短上下文",
+    "longContextLabel": "長上下文",
+    "longContextDesc": "輸入超過 {{threshold}} tokens 時，整次請求按長上下文價格計費。",
     "totalModels": "共 {{count}} 個模型",
     "noModelsFound": "未找到匹配的模型",
     "noModelsFoundTip": "請嘗試調整篩選條件或搜索關鍵詞",
@@ -703,10 +960,11 @@
     "currencyInfo5": "例如",
     "currencyInfo6": "：gpt-4 輸入： $0.03 / 1K tokens 完成：$0.06 / 1K tokens",
     "currencyInfo7": "0.03 / 0.002 = 15, 0.06 / 0.002 = 30，即輸入倍率為 15，完成倍率為 30",
-    "errPricesWarning": "存在供應商類型錯誤的模型，請及時配置：",
+    "errPricesWarning": "存在供應商類型錯誤的模型，請及時配置",
+    "modelCountLabel": "共 {{count}} 個",
     "multipleOperation": "合併操作",
     "newButton": "新建",
-    "noPriceModelWarning": "存在未配置價格的模型，請及時配置價格：",
+    "noPriceModelWarning": "存在未配置價格的模型，請及時配置價格",
     "refreshButton": "刷新",
     "singleOperation": "單條操作",
     "updatePricesButton": "更新價格",
@@ -742,10 +1000,16 @@
     "lockedTip": "價格鎖定後無法通過價格更新伺服器和程序覆蓋。如果您所配置的價格希望隨程序或價格伺服器同步更新，請勿鎖定",
     "completionRatio": "完成倍率",
     "delMultipleInfoTip": "確定刪除所選的 {{count}} 個價格嗎？",
+    "extraRatios": "額外擴展倍率",
     "noAvailableRatios": "冇可用嘅擴展倍率",
     "noExtraRatios": "暫無額外擴展倍率，請從下拉框選擇添加",
     "promptRatio": "提示倍率",
-    "selectExtraRatio": "選擇擴展倍率"
+    "selectExtraRatio": "選擇擴展倍率",
+    "longContext": "長上下文分檔",
+    "longContextThreshold": "閾值(tokens)",
+    "longContextInputRatio": "輸入倍率",
+    "longContextOutputRatio": "輸出倍率",
+    "longContextHelp": "輸入 token 超過閾值時，整次請求按上述倍率計費；閾值留空或為 0 表示不啟用。"
   },
   "profile": "個人設定",
   "profilePage": {
@@ -758,6 +1022,10 @@
     "displayName": "顯示名稱",
     "generateToken": "生成訪問令牌",
     "inputDisplayNamePlaceholder": "請輸入顯示名稱",
+    "quotaRemindEnabled": "接收額度提醒郵件",
+    "quotaRemindThreshold": "額度提醒閾值",
+    "quotaRemindThresholdPlaceholder": "剩餘額度低於此值時郵件提醒，填 0 表示僅在額度用盡時提醒",
+    "quotaRemindThresholdDefault": "留空使用系統預設：{{default}}",
     "inputPasswordPlaceholder": "請輸入密碼",
     "inputUsernamePlaceholder": "請輸入用戶名",
     "keepSafe": "請妥善保管。如有洩漏，請立即重置。",
@@ -849,7 +1117,19 @@
     "usernameRequired": "用戶名是必填項",
     "validEmailRequired": "必須是有效的電郵地址",
     "verificationCodeRequired": "驗證碼是必填項",
-    "verificationInfo": "請稍後幾秒重試，Turnstile 正在檢查用戶環境！"
+    "verificationInfo": "請稍後幾秒重試，Turnstile 正在檢查用戶環境！",
+    "agreementRequired": "請先閱讀並勾選同意相關協議",
+    "agreementPrefix": "我已閱讀並同意",
+    "userAgreement": "用戶協議",
+    "privacyPolicy": "隱私政策",
+    "agreementAnd": "和",
+    "inviteCodeRequired": "邀請碼是必填項",
+    "registering": "註冊中..."
+  },
+  "legalConsentDialog": {
+    "title": "協議更新",
+    "description": "相關協議已更新，請閱讀並同意後繼續使用。",
+    "button": "同意並繼續"
   },
   "registerPage": {
     "alreadyHaveAccount": "已經有帳號了? 點擊登入"
@@ -864,7 +1144,15 @@
   "theme": {
     "auto": "跟隨系統",
     "light": "淺色模式",
-    "dark": "深色模式"
+    "dark": "深色模式",
+    "color": "主題色",
+    "colors": {
+      "default": "默認",
+      "blue": "藍色",
+      "cyan": "青色",
+      "purple": "紫色",
+      "red": "紅色"
+    }
   },
   "setting_index": {
     "operationSettings": {
@@ -890,6 +1178,20 @@
           "label": "重試間隔(秒)",
           "placeholder": "重試間隔(秒)"
         },
+        "retryCooldownPerStatus": {
+          "title": "按狀態碼自訂凍結時間",
+          "description": "按渠道+模型粒度凍結。優先級：上游 retryDelay > 按狀態碼 > 重試間隔（僅 429）。",
+          "openTooltip": "按狀態碼自訂",
+          "customHelper": "秒數填 0 = 不凍結，僅跳過當前請求",
+          "statusCodeLabel": "狀態碼",
+          "secondsLabel": "凍結秒數",
+          "delete": "刪除",
+          "addRule": "+ 新增規則",
+          "close": "關閉",
+          "invalidStatusCode": "狀態碼 \"{{code}}\" 必須是 100-599 之間的整數",
+          "invalidSeconds": "狀態碼 {{code}} 的凍結秒數必須是非負整數",
+          "duplicateStatusCode": "狀態碼 {{code}} 重複，每個狀態碼只能配置一次"
+        },
         "retryTimes": {
           "label": "重試次數",
           "placeholder": "重試次數"
@@ -904,11 +1206,27 @@
           "label": "重試超時時間(秒)",
           "placeholder": "重試超時時間(秒)"
         },
+        "channelFailErrorWrapEnabled": "封裝上游錯誤信息",
+        "channelFailErrorWrapEnabledTooltip": "關閉後客戶端將收到上游原始錯誤文案（可能包含 key 片段、provider 名等敏感信息），僅建議運維臨時關掉用於調試",
+        "channelFailErrorMessage": {
+          "label": "渠道失敗統一返回文案",
+          "placeholder": "所有非 400 的上游失敗（401/403/404/429/5xx）統一坍縮為此文案 + 503；留空使用默認值"
+        },
         "emptyResponseBilling": "空回覆計費",
         "unifiedRequestResponseModel": "統一請求響應模型",
-        "unifiedRequestResponseModelTooltip": "當存在模型映射時，響應中的model值為請求的model值，而非實際調用的模型名稱"
+        "unifiedRequestResponseModelTooltip": "當存在模型映射時，響應中的model值為請求的model值，而非實際調用的模型名稱",
+        "modelNameCaseInsensitive": "模型名稱大小寫不敏感",
+        "modelNameCaseInsensitiveTooltip": "開啟後，模型匹配時將忽略大小寫，例如 GPT-4、gpt-4、Gpt-4 都會匹配到同一個模型",
+        "subGroups": {
+          "displayOptions": "顯示與計費選項",
+          "linkAndBilling": "鏈接與計費",
+          "retry": "重試策略",
+          "upstreamError": "上游錯誤處理"
+        }
       },
       "logSettings": {
+        "autoDelete": "啟用消費日誌自動清理",
+        "autoDeleteDays": "自動清理保留天數",
         "clearLogs": "清理歷史日誌",
         "logCleanupTime": {
           "label": "日誌清理時間",
@@ -920,6 +1238,7 @@
       "monitoringSettings": {
         "automaticDisableChannel": "失敗時自動禁用通道",
         "automaticEnableChannel": "成功時自動啟用通道",
+        "automaticDisableChannelNotify": "自動禁用通道時發送通知",
         "channelDisableThreshold": {
           "label": "最長響應時間",
           "placeholder": "單位秒，當運行通道全部測試時，超過此時間將自動禁用通道"
@@ -928,6 +1247,7 @@
           "label": "額度提醒閾值",
           "placeholder": "低於此額度時將發送郵件提醒用戶"
         },
+        "quotaRemindEnabled": "啟用額度提醒郵件",
         "saveMonitoringSettings": "保存監控設置",
         "title": "監控設置"
       },
@@ -1046,9 +1366,22 @@
           "placeholder": "請輸入需要開啟推理輸出的模型，JSON格式，例如：{\"gemini-2.5-pro-preview-05-06\": true}"
         },
         "save": "保存Gemini設置"
+      },
+      "invoice": {
+        "title": "賬單設置",
+        "genTime": "賬單時間",
+        "genMonthInvoice": "生成月賬單",
+        "updateMonthInvoice": "更新月賬單"
       }
     },
     "otherSettings": {
+      "languageSettings": {
+        "title": "語言設置",
+        "defaultLanguageLabel": "默認語言",
+        "setDefaultLanguage": "設置默認語言",
+        "switchPromptEnabled": "根據瀏覽器語言提示用戶切換語言",
+        "switchPromptTip": "開啟後，若訪客的瀏覽器語言與當前顯示語言不一致，將提示一次是否切換。除非其瀏覽器語言再次發生變化，否則不會重複提示。"
+      },
       "customSettings": {
         "aboutLabel": "關於",
         "aboutPlaceholder": "在此輸入新的關於內容，支持 Markdown & HTML 代碼。如果輸入的是一個鏈接，則會使用該鏈接作為 iframe 的 src 屬性，這允許你設置任意網頁作為關於頁面。",
@@ -1081,6 +1414,15 @@
         "close": "關閉",
         "newVersion": "新版本",
         "viewGitHub": "去 GitHub 查看"
+      },
+      "legalSettings": {
+        "title": "用戶協議 / 隱私政策",
+        "userAgreementLabel": "用戶協議內容",
+        "userAgreementPlaceholder": "在此輸入用戶協議內容，支持 HTML & Markdown",
+        "saveUserAgreement": "保存用戶協議",
+        "privacyPolicyLabel": "隱私政策內容",
+        "privacyPolicyPlaceholder": "在此輸入隱私政策內容，支持 HTML & Markdown",
+        "savePrivacyPolicy": "保存隱私政策"
       }
     },
     "systemSettings": {
@@ -1134,7 +1476,9 @@
         "thirdPartyLogin": "第三方登錄",
         "turnstileCheck": "啟用 Turnstile 用戶校驗",
         "weChatAuth": "允許通過微信登錄 & 註冊",
-        "gitHubOldIdClose": "關閉 GitHub 老 ID 登錄"
+        "gitHubOldIdClose": "關閉 GitHub 老 ID 登錄",
+        "userAgreementEnabled": "啟用用戶協議",
+        "privacyPolicyEnabled": "啟用隱私政策"
       },
       "configureOIDCAuthorization": {
         "alert1": "首頁鏈接填",
@@ -1235,7 +1579,9 @@
     "tokenName": "令牌名稱",
     "type": "類型",
     "username": "用戶名稱",
-    "sourceIp": "Source IP"
+    "sourceIp": "Source IP",
+    "requestId": "請求ID",
+    "upstreamRequestId": "上游請求ID"
   },
   "task": "非同步任務",
   "taskPage": {
@@ -1333,7 +1679,32 @@
     "limits_ip_whitelist_info": "限制權杖只能從特定IP位址或範圍存取",
     "limits_ip_whitelist_switch": "啟用IP白名單",
     "limits_ip_whitelist_input": "IP位址",
-    "limits_ip_whitelist_helper": "每行輸入一個IP位址或CIDR範圍（如：192.168.1.1 或 10.0.0.0/8）"
+    "limits_ip_whitelist_helper": "每行輸入一個IP位址或CIDR範圍（如：192.168.1.1 或 10.0.0.0/8）",
+    "billingTag": "費用標籤",
+    "billingTagInfo": "用於按照分組統計費用，僅管理員可設定",
+    "billingTagLabel": "費用標籤",
+    "billingTagHelper": "選擇一個分組作為費用標籤，用於按分組統計該權杖的費用",
+    "adminSearch": "管理員搜索",
+    "adminSearchDesc": "按用戶ID或令牌Key搜索所有用戶的令牌",
+    "userId": "用戶ID",
+    "userIdPlaceholder": "輸入用戶ID",
+    "tokenId": "令牌ID",
+    "tokenIdPlaceholder": "輸入令牌ID",
+    "tokenKeySearch": "令牌Key",
+    "tokenKeySearchPlaceholder": "輸入令牌Key（支援前綴，可含 sk-）",
+    "search": "查詢",
+    "clearSearch": "清除",
+    "owner": "所屬",
+    "adminEditWarning": "您正在以管理員身份編輯此權杖，可以修改權杖所屬用戶",
+    "transferToUser": "所屬用戶ID",
+    "transferToUserHelper": "修改用戶ID可轉移此權杖的所有權",
+    "accessedTime": "最近使用",
+    "tokenKey": "密鑰",
+    "createdSuccessTitle": "權杖建立成功",
+    "createdSuccessTip": "請妥善保存此權杖，請勿洩露給他人。",
+    "done": "完成",
+    "showKey": "顯示密鑰",
+    "hideKey": "隱藏密鑰"
   },
   "topup": "儲值",
   "topupCard": {
@@ -1377,6 +1748,9 @@
     "id": "ID",
     "name": "名稱",
     "nameTip": "給用戶看的名稱",
+    "description": "描述",
+    "descriptionTip": "面向用戶展示的分組說明，最長 500 字符",
+    "descriptionTooLong": "描述最長 500 字符",
     "public": "是否公開",
     "promotion": "自動升級",
     "promotionTip": "啟用後，用戶充值金額滿足最小-最大條件時將自動升級到此用戶組",
@@ -1396,6 +1770,8 @@
     "adminUserRole": "管理員",
     "bind": "綁定",
     "cUserRole": "普通用戶",
+    "reliableUserRole": "可信內部員工",
+    "setReliable": "設為可信內部員工",
     "cancel": "取消",
     "cancelAdmin": "取消管理員",
     "createUser": "新建用戶",
@@ -1417,8 +1793,12 @@
     "refresh": "刷新",
     "saveSuccess": "保存成功！",
     "searchPlaceholder": "搜索用戶的ID、用戶名、分組、顯示名稱，以及電子郵件地址...",
+    "setCommonUser": "設為普通用戶",
     "setAdmin": "設為管理員",
     "statistics": "統計信息",
+    "remainingShort": "剩餘",
+    "usedShort": "已用",
+    "requestCountShort": "調用",
     "status": "狀態",
     "submit": "提交",
     "superAdminRole": "超級管理員",
@@ -1429,8 +1809,8 @@
     "usernameRequired": "用戶名不能為空",
     "users": "用戶",
     "changeQuota": "增減額度",
-    "changeQuotaHelperText": "呢度係增減，唔係直接更改用戶餘額，輸入美元，你最多可以扣除 {{quota}}",
-    "changeQuotaNotEmpty": "請填寫更改額度",
+    "changeQuotaHelperText": "呢度係增減，唔係直接更改用戶餘額，最多可以扣除 {{tokens}} tokens (≈ {{money}})",
+    "changeQuotaNotEmpty": "變更額度不能為 0",
     "changeQuotaNotEnough": "唔可以扣除超過用戶餘額嘅金額",
     "quotaRemark": "備註"
   },

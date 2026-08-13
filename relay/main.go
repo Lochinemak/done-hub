@@ -47,8 +47,12 @@ func Relay(c *gin.Context) {
 
 	c.Set("is_stream", relay.IsStream())
 	if err := relay.setProvider(relay.getOriginalModel()); err != nil {
-		openaiErr := common.StringErrorWrapperLocal(err.Error(), "one_hub_error", http.StatusServiceUnavailable)
-		relay.HandleJsonError(openaiErr)
+		// 配置错误 → 404 model_not_found（SDK 不重试）；运行时错误 → 503 collapse（SDK 重试）。
+		if IsModelNotFound(err) {
+			relay.HandleJsonError(common.ModelNotFoundError(relay.getOriginalModel()))
+		} else {
+			relay.HandleJsonError(common.UpstreamUnavailableError(err.Error()))
+		}
 		return
 	}
 
@@ -64,7 +68,7 @@ func Relay(c *gin.Context) {
 	}
 
 	channel := relay.getProvider().GetChannel()
-	go processChannelRelayError(c.Request.Context(), channel.Id, channel.Name, apiErr, channel.Type)
+	notifyChannelRelayError(c.Request.Context(), c, channel, apiErr)
 
 	retryTimes := config.RetryTimes
 	// 在重试开始前计算并缓存总渠道数，避免重试过程中动态变化
@@ -76,8 +80,8 @@ func Relay(c *gin.Context) {
 	totalChannelsAtStart := model.ChannelGroup.CountAvailableChannels(groupName, modelName)
 
 	if done || !shouldRetry(c, apiErr, channel.Type) {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("retry_skip model=%s channel_id=%d status_code=%d done=%t should_retry=%t total_channels=%d error=\"%s\"",
-			modelName, channel.Id, apiErr.StatusCode, done, shouldRetry(c, apiErr, channel.Type), totalChannelsAtStart, utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("retry_skip model=%s channel_id=%d status_code=%d upstream_id=%s done=%t should_retry=%t total_channels=%d error=\"%s\"",
+			modelName, channel.Id, apiErr.StatusCode, c.GetString(config.GinUpstreamRequestIdKey), done, shouldRetry(c, apiErr, channel.Type), totalChannelsAtStart, utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
 		retryTimes = 0
 	}
 
@@ -95,11 +99,17 @@ func Relay(c *gin.Context) {
 	c.Set("attempt_count", 1) // 初始化尝试计数
 
 	// 记录初始失败 - 使用统一的结构化日志格式
-	logger.LogError(c.Request.Context(), fmt.Sprintf("retry_start model=%s channel_id=%d total_channels=%d config_max_retries=%d actual_max_retries=%d status_code=%d error=\"%s\"",
-		modelName, channel.Id, totalChannelsAtStart, retryTimes, actualRetryTimes, apiErr.StatusCode, utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
+	logger.LogError(c.Request.Context(), fmt.Sprintf("retry_start model=%s channel_id=%d total_channels=%d config_max_retries=%d actual_max_retries=%d status_code=%d upstream_id=%s error=\"%s\"",
+		modelName, channel.Id, totalChannelsAtStart, retryTimes, actualRetryTimes, apiErr.StatusCode, c.GetString(config.GinUpstreamRequestIdKey), utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
 
-	if apiErr.StatusCode != http.StatusUnauthorized && apiErr.StatusCode != http.StatusForbidden {
-		c.Set("first_non_auth_error", apiErr)
+	// breakReason 区分循环退出原因，避免最终日志一律打成 retry_exhausted 而产生误导。
+	// 默认值 "exhausted" 表示循环自然跑完（真的把可用渠道用完了）。
+	// 注意：done==true 或 shouldRetry==false 触发的早跳过路径上方会把 retryTimes 置 0，
+	// 导致 actualRetryTimes=0，循环根本不进入；此时若不预置 "skipped"，最终会落到
+	// "retry_exhausted reason=exhausted actual_max_retries=0" 的自相矛盾日志。
+	breakReason := "exhausted"
+	if actualRetryTimes == 0 {
+		breakReason = "skipped"
 	}
 
 	for i := actualRetryTimes; i > 0; i-- {
@@ -109,13 +119,17 @@ func Relay(c *gin.Context) {
 		if time.Since(startTime) > timeout {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("retry_timeout model=%s channel_id=%d elapsed_time=%.2fs timeout=%.2fs",
 				modelName, channel.Id, time.Since(startTime).Seconds(), timeout.Seconds()))
-			apiErr = common.StringErrorWrapperLocal("重试超时，上游负载已饱和，请稍后再试", "system_error", http.StatusTooManyRequests)
+			// UpstreamUnavailableError 让 FilterOpenAIErr 坍缩为 503 + 统一文案，与"无可用渠道"出口对齐。
+			// 原 message 保留供 retry_aborted 日志诊断。
+			apiErr = common.UpstreamUnavailableError("重试超时，上游负载已饱和，请稍后再试")
+			breakReason = "timeout"
 			break
 		}
 
 		if err := relay.setProvider(relay.getOriginalModel()); err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("retry_provider_error model=%s channel_id=%d error=\"%s\"",
 				modelName, channel.Id, err.Error()))
+			breakReason = "provider_error"
 			break
 		}
 
@@ -148,28 +162,27 @@ func Relay(c *gin.Context) {
 		}
 
 		// 记录重试失败
-		logger.LogError(c.Request.Context(), fmt.Sprintf("retry_failed model=%s channel_id=%d attempt=%d/%d status_code=%d error_type=\"%s\" error=\"%s\"",
-			modelName, channel.Id, attemptCount, actualRetryTimes, apiErr.StatusCode, apiErr.OpenAIError.Type, utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("retry_failed model=%s channel_id=%d attempt=%d/%d status_code=%d upstream_id=%s error_type=\"%s\" error=\"%s\"",
+			modelName, channel.Id, attemptCount, actualRetryTimes, apiErr.StatusCode, c.GetString(config.GinUpstreamRequestIdKey), apiErr.OpenAIError.Type, utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
 
-		if apiErr.StatusCode != http.StatusUnauthorized && apiErr.StatusCode != http.StatusForbidden {
-			if _, exists := c.Get("first_non_auth_error"); !exists {
-				c.Set("first_non_auth_error", apiErr)
-			}
-		}
-
-		go processChannelRelayError(c.Request.Context(), channel.Id, channel.Name, apiErr, channel.Type)
+		notifyChannelRelayError(c.Request.Context(), c, channel, apiErr)
 		if done || !shouldRetry(c, apiErr, channel.Type) {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("retry_stop_condition model=%s channel_id=%d attempt=%d/%d done=%t should_retry=%t",
 				modelName, channel.Id, attemptCount, actualRetryTimes, done, shouldRetry(c, apiErr, channel.Type)))
+			breakReason = "stop_condition"
 			break
 		}
 	}
 
-	// 记录最终失败
+	// 记录最终失败：循环自然跑完用 retry_exhausted，中途 break 用 retry_aborted + reason
 	finalAttempt := c.GetInt("attempt_count")
 	actualRetryTimes = c.GetInt("actual_retry_times")
-	logger.LogError(c.Request.Context(), fmt.Sprintf("retry_exhausted model=%s channel_id=%d total_attempts=%d total_channels=%d config_max_retries=%d actual_max_retries=%d status_code=%d error=\"%s\"",
-		modelName, channel.Id, finalAttempt, c.GetInt("total_channels_at_start"), retryTimes, actualRetryTimes, apiErr.StatusCode, utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
+	finalLogTag := "retry_exhausted"
+	if breakReason != "exhausted" {
+		finalLogTag = "retry_aborted"
+	}
+	logger.LogError(c.Request.Context(), fmt.Sprintf("%s reason=%s model=%s channel_id=%d total_attempts=%d total_channels=%d config_max_retries=%d actual_max_retries=%d status_code=%d upstream_id=%s error=\"%s\"",
+		finalLogTag, breakReason, modelName, channel.Id, finalAttempt, c.GetInt("total_channels_at_start"), retryTimes, actualRetryTimes, apiErr.StatusCode, c.GetString(config.GinUpstreamRequestIdKey), utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
 
 	if apiErr != nil {
 		// 确保 channel_type 存在，用于 FilterOpenAIErr 正确过滤错误
@@ -187,10 +200,70 @@ func Relay(c *gin.Context) {
 	}
 }
 
+// promptTokenForcer 由能在忽略 PreCost 开关的前提下强制计算输入 token 的 relay 实现。
+// 当渠道关闭预扣费（getPromptTokens 返回 0）时，超限守卫用它兜底，避免被绕过。
+type promptTokenForcer interface {
+	forcePromptTokens() int
+}
+
+// checkPromptTokenLimit 在发送上游前拦截超过模型上下文上限的请求（仅 AWS/Bedrock 渠道）。
+// 有效上限：优先 model_info.ContextLength(>0)，否则回落全局 config.MaxPromptTokens；<=0 视为不限。
+func checkPromptTokenLimit(relay RelayBaseInterface, promptTokens int) *types.OpenAIErrorWithStatusCode {
+	provider := relay.getProvider()
+	if provider == nil {
+		return nil
+	}
+	ch := provider.GetChannel()
+	if ch == nil || (ch.Type != config.ChannelTypeBedrock && ch.Type != config.ChannelTypeBedrockMessages) {
+		return nil
+	}
+
+	limit := config.MaxPromptTokens
+	// GetPrice 未命中也返回默认 Price（ModelInfo 为 nil），不会返回 nil，故只需判 ModelInfo。
+	if price := model.PricingInstance.GetPrice(relay.getModelName()); price.ModelInfo != nil && price.ModelInfo.ContextLength > 0 {
+		limit = price.ModelInfo.ContextLength
+	}
+	if limit <= 0 {
+		return nil
+	}
+
+	tokens := promptTokens
+	if tokens <= 0 {
+		// 渠道关闭预扣费时 promptTokens 为 0，强制计一次数
+		if forcer, ok := relay.(promptTokenForcer); ok {
+			tokens = forcer.forcePromptTokens()
+		}
+	}
+
+	if tokens > limit {
+		// 文案对齐 Anthropic 官方超上下文的 400：`prompt is too long: N tokens > M maximum`，
+		// 且 Type=invalid_request_error。这样经 done-hub 的 Claude Code / Anthropic SDK 客户端
+		// 能像识别官方 400 一样识别它（触发 /compact 或提示压缩），而非当成陌生的自定义错误。
+		msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum", tokens, limit)
+		return &types.OpenAIErrorWithStatusCode{
+			OpenAIError: types.OpenAIError{
+				Message: msg,
+				Type:    "invalid_request_error",
+				Code:    "prompt_tokens_exceed_limit",
+			},
+			StatusCode: http.StatusBadRequest,
+			LocalError: true,
+		}
+	}
+	return nil
+}
+
 func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCode, done bool) {
 	promptTokens, tonkeErr := relay.getPromptTokens()
 	if tonkeErr != nil {
 		err = common.ErrorWrapperLocal(tonkeErr, "token_error", http.StatusBadRequest)
+		done = true
+		return
+	}
+
+	// 超大请求预拦截（仅 AWS/Bedrock）：在预扣费与发送上游之前拦下，避免超限请求
+	// 在上游静默挂起直到墙钟超时。拒绝时不预扣费、不触发 undo。
+	if err = checkPromptTokenLimit(relay, promptTokens); err != nil {
 		done = true
 		return
 	}
@@ -207,6 +280,13 @@ func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCod
 		return
 	}
 
+	// 每次尝试前清掉上一轮渠道残留的上游 request-id / 透传头，避免重试换渠道后
+	// 日志落库与响应头串味（失败渠道的值残留到成功渠道）。
+	// 有意不清 raw body 相关 key：现有 provider 只在成功路径写它们，而写入之后的失败路径
+	// 都会置 done=true 不再重试，故不存在残留。新增写入点若打破这个前提，需一并清。
+	relay.getContext().Set(config.GinUpstreamRequestIdKey, "")
+	relay.getContext().Set(config.GinPassThroughHeaders, nil)
+
 	err, done = relay.send()
 	// 最后处理流式中断时计算tokens
 	if usage.CompletionTokens == 0 && usage.TextBuilder.Len() > 0 {
@@ -214,7 +294,9 @@ func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCod
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 
-	// 即使出错，只要有实际输出就记录计费，避免上游已计费但本地未记录
+	// 即使出错，只要有实际输出就记录计费，避免上游已计费但本地无记录。
+	// CompletionTokens 来自上游返回的 usage（image_*.go 在 ErrorHandle 前也会落 usage），
+	// 是"上游真的处理了请求"的可靠信号；PromptTokens 不行，它在 send 之前就被本地 tokenize 填了。
 	if err != nil {
 		if usage.CompletionTokens > 0 {
 			quota.SetFirstResponseTime(relay.GetFirstResponseTime())
@@ -235,34 +317,53 @@ func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCod
 func shouldCooldowns(c *gin.Context, channel *model.Channel, apiErr *types.OpenAIErrorWithStatusCode) bool {
 	modelName := c.GetString("new_model")
 	channelId := channel.Id
-	cooldownApplied := false
+	statusCode := apiErr.StatusCode
 
-	// 如果是频率限制，冻结通道
-	if apiErr.StatusCode == http.StatusTooManyRequests {
-		// 检查是否有响应头中的冻结时间（如 ClaudeCode 的 anthropic-ratelimit-unified-reset）
-		if apiErr.RateLimitResetAt > 0 {
-			// 使用响应头中的冻结时间
-			nowTime := time.Now().Unix()
-			durationSeconds := apiErr.RateLimitResetAt - nowTime
-			if durationSeconds > 0 {
-				model.ChannelGroup.SetCooldownsWithDuration(channelId, modelName, durationSeconds)
-				cooldownApplied = true
-				logger.LogWarn(c.Request.Context(), fmt.Sprintf("channel_cooldown channel_id=%d model=\"%s\" duration=%ds reason=\"rate_limit\" reset_at=%s",
-					channelId, modelName, durationSeconds, time.Unix(apiErr.RateLimitResetAt, 0).Format(time.RFC3339)))
-			} else {
-				// 冻结时间已过，使用默认冻结时间
-				model.ChannelGroup.SetCooldowns(channelId, modelName)
-				cooldownApplied = true
-				logger.LogWarn(c.Request.Context(), fmt.Sprintf("channel_cooldown channel_id=%d model=\"%s\" duration=%ds reason=\"rate_limit\"",
-					channelId, modelName, config.RetryCooldownSeconds))
-			}
+	// 决定冻结时长（秒）。优先级：
+	//   1. 上游返回的精确恢复时间（RateLimitResetAt，如 Gemini retryDelay / anthropic-ratelimit-unified-reset）
+	//   2. 管理员配置的按状态码冻结时长（RetryCooldownPerStatus）
+	//   3. 全局兜底 RetryCooldownSeconds，仅对 429 启用以保持向后兼容
+	//
+	// 任何一步算出 duration <= 0 都视为"不冻结"，直接跳过 channel 而不冻它。
+	//
+	// 注意：RateLimitResetAt 是对任何状态码生效的——provider 只应在拿到上游精确的
+	// Retry-After 信号时设置此字段，详见 types/common.go 上的字段注释。
+	var duration int64
+	var reason string
+
+	if apiErr.RateLimitResetAt > 0 {
+		nowTime := time.Now().Unix()
+		duration = apiErr.RateLimitResetAt - nowTime
+		if duration > 0 {
+			reason = "upstream_retry_after"
 		} else {
-			// 没有响应头中的冻结时间，使用配置中的默认冻结时间
-			model.ChannelGroup.SetCooldowns(channelId, modelName)
-			cooldownApplied = true
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("channel_cooldown channel_id=%d model=\"%s\" duration=%ds reason=\"rate_limit\"",
-				channelId, modelName, config.RetryCooldownSeconds))
+			// 上游告诉的时间已过，落到下一级配置
+			duration = 0
 		}
+	}
+
+	if duration <= 0 {
+		if secs, ok := config.GetRetryCooldownForStatus(statusCode); ok {
+			duration = int64(secs)
+			reason = fmt.Sprintf("per_status_%d", statusCode)
+		} else if statusCode == http.StatusTooManyRequests {
+			duration = int64(config.RetryCooldownSeconds)
+			reason = "rate_limit"
+		}
+	}
+
+	if duration > 0 {
+		model.ChannelGroup.SetCooldownsWithDuration(channelId, modelName, duration)
+		extra := ""
+		if apiErr.RateLimitResetAt > 0 && reason == "upstream_retry_after" {
+			extra = fmt.Sprintf(" reset_at=%s", time.Unix(apiErr.RateLimitResetAt, 0).Format(time.RFC3339))
+		}
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("channel_cooldown channel_id=%d model=\"%s\" status_code=%d duration=%ds reason=\"%s\"%s",
+			channelId, modelName, statusCode, duration, reason, extra))
+	} else if reason != "" {
+		// 配置命中（如 per-status=0）但显式不冻结。打日志方便线上排查"为什么没冷却"。
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("channel_cooldown_skipped channel_id=%d model=\"%s\" status_code=%d reason=\"%s\"",
+			channelId, modelName, statusCode, reason))
 	}
 
 	skipChannelIds, ok := utils.GetGinValue[[]int](c, "skip_channel_ids")
@@ -273,7 +374,7 @@ func shouldCooldowns(c *gin.Context, channel *model.Channel, apiErr *types.OpenA
 	skipChannelIds = append(skipChannelIds, channelId)
 	c.Set("skip_channel_ids", skipChannelIds)
 
-	return cooldownApplied
+	return duration > 0
 }
 
 // applies pre-mapping before setRequest to ensure modifications take effect

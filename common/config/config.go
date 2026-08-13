@@ -14,6 +14,7 @@ func InitConf() {
 	setEnv()
 	Language = viper.GetString("language")
 	IsMasterNode = viper.GetString("node_type") != "slave"
+	RelayOnly = viper.GetBool("relay_only")
 	RequestInterval = time.Duration(viper.GetInt("polling_interval")) * time.Second
 	SessionSecret = utils.GetOrDefault("session_secret", SessionSecret)
 	UserInvoiceMonth = viper.GetBool("user_invoice_month")
@@ -37,6 +38,12 @@ func defaultConfig() {
 	viper.SetDefault("sqlite_busy_timeout", 3000)
 	viper.SetDefault("sync_frequency", 600)
 	viper.SetDefault("batch_update_interval", 5)
+	viper.SetDefault("shutdown_timeout", 30)
+	viper.SetDefault("redis_pool_size", 100)
+	viper.SetDefault("redis_min_idle_conns", 10)
+	viper.SetDefault("redis_pool_timeout", 5)
+	viper.SetDefault("redis_read_timeout", 2)
+	viper.SetDefault("redis_write_timeout", 2)
 	viper.SetDefault("global.api_rate_limit", 300)
 	viper.SetDefault("global.web_rate_limit", 300)
 	viper.SetDefault("connect_timeout", 5)

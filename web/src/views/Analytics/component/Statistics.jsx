@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Grid } from '@mui/material';
 import DataCard from 'ui-component/cards/DataCard';
 import { gridSpacing } from 'store/constant';
-import { renderQuota, showError } from 'utils/common';
+import { renderQuota, renderNumber, showError } from 'utils/common';
 import { API } from 'utils/api';
 import { useTranslation } from 'react-i18next';
 import { useSelector } from 'react-redux';
@@ -35,10 +35,13 @@ export default function Overview() {
   const [rpmTpmStatistics, setRpmTpmStatistics] = useState({
     rpm: 0,
     tpm: 0,
-    cpm: 0
+    cpm: 0,
+    ppm: 0
   });
 
   const [rechargeTimeFilter, setRechargeTimeFilter] = useState('month');
+  // 实时流量卡片自动刷新开关，默认开启
+  const [realtimeAutoRefresh, setRealtimeAutoRefresh] = useState(true);
 
   const timeFilterOptions = [
     { value: 'day', label: t('analytics_index.timeFilter.day') },
@@ -150,6 +153,17 @@ export default function Overview() {
     }
   };
 
+  // 仅获取实时流量数据，供自动刷新使用，避免顺带重取用户/通道统计
+  const fetchRpmTpmStatistics = async () => {
+    try {
+      const res = await API.get('/api/analytics/rpm');
+      const { success, data } = res.data;
+      if (success && data) setRpmTpmStatistics(data);
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   // 处理时间过滤器变化
   const handleRechargeTimeFilterChange = (event) => {
     const newFilter = event.target.value;
@@ -162,14 +176,30 @@ export default function Overview() {
     fetchRechargeStatistics(rechargeTimeFilter);
   }, []);
 
+  // 首屏基础接口已带回实时流量数据，故挂载时跳过立即刷新，仅启动轮询；用户手动重新开启时才立即刷新
+  const realtimeMounted = useRef(false);
+  useEffect(() => {
+    if (!realtimeAutoRefresh) return;
+    if (realtimeMounted.current) fetchRpmTpmStatistics();
+    else realtimeMounted.current = true;
+    const timer = setInterval(fetchRpmTpmStatistics, 60000);
+    return () => clearInterval(timer);
+  }, [realtimeAutoRefresh]);
+
   return (
     <Grid container spacing={gridSpacing}>
       <Grid item lg={2.4} md={4} xs={12}>
         <DataCard
           isLoading={userLoading}
-          title={t('analytics_index.totalUserSpending')}
-          content={userStatistics?.total_used_quota || '0'}
-          subContent={t('analytics_index.totalUserBalance') + '：' + (userStatistics?.total_quota || '0')}
+          title={t('analytics_index.totalUserBalance')}
+          content={userStatistics?.total_quota || '0'}
+          subContent={
+            <>
+              {t('analytics_index.totalUsedQuota')}：{userStatistics?.total_used_quota || '0'} <br />
+              {t('analytics_index.totalRequestCount')}：{(userStatistics?.total_request_count || 0).toLocaleString()} <br />
+              {t('analytics_index.totalTokens')}：{renderNumber(userStatistics?.total_tokens || 0)}
+            </>
+          }
         />
       </Grid>
       <Grid item lg={2.4} md={4} xs={12}>
@@ -221,11 +251,18 @@ export default function Overview() {
           isLoading={rpmTpmLoading}
           title={t('analytics_index.realTimeTraffic')}
           content={`${rpmTpmStatistics.rpm} RPM`}
+          showSwitch={true}
+          switchChecked={realtimeAutoRefresh}
+          switchLabel={t('analytics_index.autoRefresh')}
+          onSwitchChange={() => setRealtimeAutoRefresh((v) => !v)}
           subContent={
             <>
               {t('analytics_index.tpmDescription')}: {rpmTpmStatistics.tpm.toLocaleString()} <br />
               {t('analytics_index.cpmDescription')}: ${rpmTpmStatistics.cpm.toFixed(4)}{' '}
               {siteInfo.PaymentUSDRate ? ` / ¥${(rpmTpmStatistics.cpm * siteInfo.PaymentUSDRate).toFixed(4)}` : ''}
+              <br />
+              {t('analytics_index.ppmDescription')}: ${rpmTpmStatistics.ppm.toFixed(4)}{' '}
+              {siteInfo.PaymentUSDRate ? ` / ¥${(rpmTpmStatistics.ppm * siteInfo.PaymentUSDRate).toFixed(4)}` : ''}
             </>
           }
         />

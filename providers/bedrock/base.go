@@ -1,22 +1,15 @@
 package bedrock
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"done-hub/common/requester"
 	"done-hub/model"
 	"done-hub/providers/base"
-	"done-hub/types"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"done-hub/providers/bedrock/category"
-	"done-hub/providers/bedrock/sigv4"
+
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 )
 
 type BedrockProviderFactory struct{}
@@ -26,9 +19,11 @@ func (f BedrockProviderFactory) Create(channel *model.Channel) base.ProviderInte
 
 	bedrockProvider := &BedrockProvider{
 		BaseProvider: base.BaseProvider{
-			Config:    getConfig(),
-			Channel:   channel,
-			Requester: requester.NewHTTPRequester(channel.GetProxy(), requestErrorHandle),
+			Config:  getConfig(),
+			Channel: channel,
+			// Requester 仅用于复用 NewRequestWithCustomParams* 的请求体构造逻辑；
+			// 实际发送由 bedrockruntime SDK 完成，故不需要错误处理回调。
+			Requester: requester.NewHTTPRequester(channel.GetProxy(), nil),
 		},
 	}
 
@@ -45,6 +40,11 @@ type BedrockProvider struct {
 	SessionToken    string
 	APIToken        string
 	Category        *category.Category
+	client          *bedrockruntime.Client
+	// errBody 缓存最近一次上游错误响应的原始 body（由 captureResponseMiddleware 在
+	// Deserialize 前 tee 出来）。用于在 SDK 反序列化失败（如中间层返回 HTML）时，
+	// 让 awsErrorToOpenAI 拿到上游真实返回而非 SDK 的解析器噪声。
+	errBody []byte
 }
 
 func getConfig() base.ProviderConfig {
@@ -54,40 +54,9 @@ func getConfig() base.ProviderConfig {
 	}
 }
 
-// 请求错误处理
-func requestErrorHandle(resp *http.Response) *types.OpenAIError {
-	bedrockError := &BedrockError{}
-	err := json.NewDecoder(resp.Body).Decode(bedrockError)
-	if err != nil {
-		return nil
-	}
-
-	return errorHandle(bedrockError)
-}
-
-// 错误处理
-func errorHandle(bedrockError *BedrockError) *types.OpenAIError {
-	if bedrockError.Message == "" {
-		return nil
-	}
-	return &types.OpenAIError{
-		Message: bedrockError.Message,
-		Type:    "Bedrock Error",
-	}
-}
-
-func (p *BedrockProvider) GetFullRequestURL(requestURL string, modelName string) string {
-	baseURL := strings.TrimSuffix(p.GetBaseURL(), "/")
-
-	return fmt.Sprintf(baseURL+requestURL, p.Region, modelName)
-}
-
 func (p *BedrockProvider) GetRequestHeaders() (headers map[string]string) {
 	headers = make(map[string]string)
 	p.CommonRequestHeaders(headers)
-	if p.APIToken != "" {
-		headers["Authorization"] = "Bearer " + p.APIToken
-	}
 	headers["Accept"] = "*/*"
 
 	return headers
@@ -110,28 +79,43 @@ func getKeyConfig(bedrock *BedrockProvider) {
 	}
 }
 
-func (p *BedrockProvider) Sign(req *http.Request) error {
-	var body []byte
-	if req.Body == nil {
-		body = []byte("")
-	} else {
-		var err error
-		body, err = io.ReadAll(req.Body)
-		if err != nil {
-			return errors.New("error getting request body: " + err.Error())
-		}
-		req.Body = io.NopCloser(bytes.NewReader(body))
-	}
-	if p.APIToken != "" {
+// awsResponseHeaderExcluded 是禁止透传的响应头（传输层 / 由下游自行设置）。
+// 透传这些会与 done-hub 自己写的响应头冲突或破坏分块传输。
+//
+// 注意：当前 filterAWSResponseHeaders 的白名单已限定为 x-amzn-* / apigw-requestid，
+// 这些传输层头不会命中该白名单，故此排除集当前是冗余的防御性兜底——仅在未来放宽
+// 白名单（如加入 x-amz-* 前缀）时才真正生效，防止误透传传输层头。
+var awsResponseHeaderExcluded = map[string]struct{}{
+	"content-length":    {},
+	"content-type":      {},
+	"content-encoding":  {},
+	"transfer-encoding": {},
+	"connection":        {},
+	"keep-alive":        {},
+}
+
+// filterAWSResponseHeaders 从上游 Bedrock 响应头中挑出可透传给客户端的 AWS 指纹头，
+// 目的是让 done-hub 中转的响应看起来像直连 AWS（携带 x-amzn-requestid /
+// x-amzn-bedrock-input-token-count / x-amzn-bedrock-output-token-count / apigw-requestid 等）。
+// 只透传 x-amzn- 前缀及 apigw-requestid，其余（包括 x-amz- 非 amzn 前缀）暂不透传，避免误伤。
+func filterAWSResponseHeaders(src http.Header) http.Header {
+	if len(src) == 0 {
 		return nil
 	}
-	sig, err := sigv4.New(sigv4.WithCredential(p.AccessKeyID, p.SecretAccessKey, p.SessionToken), sigv4.WithRegionService(p.Region, awsService))
-	if err != nil {
-		return err
+	out := http.Header{}
+	for name, values := range src {
+		lower := strings.ToLower(name)
+		if _, excluded := awsResponseHeaderExcluded[lower]; excluded {
+			continue
+		}
+		if strings.HasPrefix(lower, "x-amzn-") || lower == "apigw-requestid" {
+			for _, v := range values {
+				out.Add(name, v)
+			}
+		}
 	}
-
-	reqBodyHashHex := fmt.Sprintf("%x", sha256.Sum256(body))
-	sig.Sign(req, reqBodyHashHex, sigv4.NewTime(time.Now()))
-
-	return nil
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

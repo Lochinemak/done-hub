@@ -4,6 +4,7 @@ import (
 	"done-hub/common"
 	"done-hub/common/logger"
 	"done-hub/common/requester"
+	"done-hub/providers/base"
 	"done-hub/types"
 	"encoding/json"
 	"net/http"
@@ -93,33 +94,11 @@ func (p *CodexProvider) CreateChatCompletionStream(request *types.ChatCompletion
 	return requester.RequestStream(p.Requester, resp, chatHandler.HandlerStream)
 }
 
-// chatToResponsesRequest 将 ChatCompletionRequest 转换为 OpenAIResponsesRequest
+// chatToResponsesRequest 将 ChatCompletionRequest 转换为 OpenAIResponsesRequest，
+// 转换后走与 /v1/responses 同一份 Codex 请求规整逻辑，避免两条链路出现行为漂移。
 func (p *CodexProvider) chatToResponsesRequest(request *types.ChatCompletionRequest) *types.OpenAIResponsesRequest {
-	// 使用标准的转换方法
 	responsesRequest := request.ToResponsesRequest()
-
-	// 1. 模型名称规范化：gpt-5-* 系列统一为 gpt-5
-	if len(responsesRequest.Model) > 6 && responsesRequest.Model[:6] == "gpt-5-" && responsesRequest.Model != "gpt-5-codex" {
-		responsesRequest.Model = "gpt-5"
-	}
-
-	// 2. Codex API 要求 store 参数必须设置为 false
-	storeFalse := false
-	responsesRequest.Store = &storeFalse
-
-	// 3. 处理 temperature 和 top_p 冲突
-	// 当两者都存在时，优先保留 temperature，删除 top_p
-	// 这是因为某些 API 不允许同时设置这两个参数
-	if responsesRequest.Temperature != nil && responsesRequest.TopP != nil {
-		responsesRequest.TopP = nil
-	}
-
-	// 4. 适配 Codex CLI 格式（使用统一的方法）
-	// 注意：metadata 字段处理
-	// Go 通过结构体定义自动过滤：OpenAIResponsesRequest 中未定义 metadata 字段，
-	// 因此在 JSON 序列化时会自动忽略，效果等同于 Demo 的显式删除
-	p.adaptCodexCLI(responsesRequest)
-
+	p.prepareCodexRequest(responsesRequest)
 	return responsesRequest
 }
 
@@ -143,8 +122,17 @@ func (p *CodexProvider) applyDefaultHeaders(headers map[string]string) {
 				}
 			}
 		}
-		// 使用默认 UA
-		headers["User-Agent"] = "codex_cli_rs/0.38.0 (Ubuntu 22.4.0; x86_64) WindowsTerminal"
+		headers["User-Agent"] = DefaultCodexUserAgent
+	}
+
+	// 设置 version（上游据此对新模型做灰度门控，缺失时 gpt-5.6 等可能 404）
+	if _, exists := headers["version"]; !exists {
+		headers["version"] = DefaultCodexVersion
+	}
+
+	// 设置 originator（官方 Codex CLI 标识，缺失时可能被拒或降级）
+	if _, exists := headers["originator"]; !exists {
+		headers["originator"] = DefaultCodexOriginator
 	}
 
 	// 设置 Accept（如果没有设置）
@@ -190,17 +178,16 @@ func (h *CodexStreamHandler) HandlerStream(rawLine *[]byte, dataChan chan string
 		return
 	}
 
-	// 处理 response.completed 事件（包含 usage 信息）
-	if responsesStream.Type == "response.completed" && responsesStream.Response != nil {
-		if responsesStream.Response.Usage != nil {
-			h.Usage.PromptTokens = responsesStream.Response.Usage.InputTokens
-			h.Usage.CompletionTokens = responsesStream.Response.Usage.OutputTokens
-			h.Usage.TotalTokens = responsesStream.Response.Usage.TotalTokens
-		}
+	// 处理终止事件（completed/done/incomplete/failed，包含 usage 信息）
+	if base.IsResponsesTerminalEvent(responsesStream.Type) {
+		base.ExtractResponsesStreamUsage(&responsesStream, h.Usage)
 		return
 	}
 
-	// 处理 response.output_text.delta 事件（文本增量）
+	// 累积计费 output 文本（正文/推理/函数调用参数）：终止事件未带 usage 时，relay 层据此估算 completion，避免计费归零。
+	base.AccumulateResponsesStreamText(&responsesStream, h.Usage)
+
+	// 处理 response.output_text.delta 事件（文本增量）：转换为 Chat 格式下发给客户端。
 	if responsesStream.Type == "response.output_text.delta" {
 		delta, ok := responsesStream.Delta.(string)
 		if !ok {

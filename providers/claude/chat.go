@@ -31,6 +31,7 @@ type ClaudeStreamHandler struct {
 	StreamTolls int
 	Prefix      string
 	Context     *gin.Context // 添加 Context 用于获取响应模型名称
+	StartUsage  *Usage       // 保留 message_start 的 usage，message_delta 合并时回填 cache_* 字段
 }
 
 func (p *ClaudeProvider) CreateChatCompletion(request *types.ChatCompletionRequest) (*types.ChatCompletionResponse, *types.OpenAIErrorWithStatusCode) {
@@ -124,7 +125,6 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*ClaudeRequest
 	claudeRequest := ClaudeRequest{
 		Model:         request.Model,
 		Messages:      make([]Message, 0),
-		System:        "",
 		MaxTokens:     request.MaxTokens,
 		StopSequences: nil,
 		Temperature:   request.Temperature,
@@ -152,7 +152,12 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*ClaudeRequest
 
 	// 如果请求中已经有 system 字段（如数组格式带 cache_control），直接使用
 	if request.System != nil {
-		claudeRequest.System = request.System
+		// 检查是否为空字符串，避免传递空 system 字段
+		if str, ok := request.System.(string); ok && str == "" {
+			// 空字符串不设置，保持为 nil
+		} else {
+			claudeRequest.System = request.System
+		}
 	}
 
 	// 处理 messages
@@ -488,16 +493,25 @@ func (h *ClaudeStreamHandler) HandlerStream(rawLine *[]byte, dataChan chan strin
 	switch claudeResponse.Type {
 	case "message_start":
 		h.convertToOpenaiStream(&claudeResponse, dataChan)
-		h.Usage.PromptTokens = claudeResponse.Message.Usage.InputTokens
+		ClaudeUsageToOpenaiUsage(&claudeResponse.Message.Usage, h.Usage)
+		h.StartUsage = &claudeResponse.Message.Usage
+		// message_start 的 output_tokens 仅为占位(1)，非真实产出。清零 CompletionTokens，
+		// 使流式中断(message_delta 未达)时 relay/main.go 全局兜底的 ==0 条件可达，
+		// 用累积文本估算避免计费归零。StartUsage 保留原值，供 message_delta 的 merge 取大者。
+		h.Usage.CompletionTokens = 0
+		h.Usage.TotalTokens = h.Usage.PromptTokens
 
 	case "message_delta":
 		h.convertToOpenaiStream(&claudeResponse, dataChan)
-		h.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
-		h.Usage.TotalTokens = h.Usage.PromptTokens + h.Usage.CompletionTokens
+		ClaudeUsageMerge(&claudeResponse.Usage, h.StartUsage)
+		ClaudeUsageToOpenaiUsage(&claudeResponse.Usage, h.Usage)
 
 	case "content_block_delta":
 		h.convertToOpenaiStream(&claudeResponse, dataChan)
+		// text_delta / thinking_delta / input_json_delta 均为计费的 output token，一并累积用于兜底估算。
 		h.Usage.TextBuilder.WriteString(claudeResponse.Delta.Text)
+		h.Usage.TextBuilder.WriteString(claudeResponse.Delta.Thinking)
+		h.Usage.TextBuilder.WriteString(claudeResponse.Delta.PartialJson)
 	case "content_block_start":
 		h.convertToOpenaiStream(&claudeResponse, dataChan)
 

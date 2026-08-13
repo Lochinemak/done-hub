@@ -1,6 +1,8 @@
 package config
 
 import (
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +20,9 @@ var Debug = false
 var OldTokenMaxId = 0
 
 var Language = ""
+
+// LanguageSwitchPromptEnabled 控制前端是否在检测到浏览器语言与当前显示语言不一致时，提示用户切换语言。
+var LanguageSwitchPromptEnabled = true
 var Footer = ""
 var Logo = ""
 var TopUpLink = ""
@@ -26,6 +31,7 @@ var ChatLinks = ""
 var AnalyticsCode = ""
 var QuotaPerUnit = 500 * 1000.0 // $0.002 / 1K tokens
 var DisplayInCurrencyEnabled = true
+var DisplayTokenStatEnabled = true
 
 // 是否开启用户月账单功能
 var UserInvoiceMonth = false
@@ -46,6 +52,8 @@ var LarkAuthEnabled = false
 var TurnstileCheckEnabled = false
 var RegisterEnabled = true
 var InviteCodeRegisterEnabled = false
+var UserAgreementEnabled = false
+var PrivacyPolicyEnabled = false
 var OIDCAuthEnabled = false
 var LinuxDoOAuthEnabled = false
 var LinuxDoOAuthTrustLevelEnabled = false
@@ -153,6 +161,9 @@ var MemoryCacheEnabled = false
 
 var LogConsumeEnabled = true
 
+var LogAutoDeleteEnabled = false // 是否启用消费日志自动清理
+var LogAutoDeleteDays = 30       // 保留天数，默认30天
+
 var SMTPServer = ""
 var SMTPPort = 587
 var SMTPAccount = ""
@@ -194,16 +205,58 @@ var InviterRewardValue = 0
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
-var QuotaRemindThreshold = 1000
+var AutomaticDisableChannelNotifyEnabled = true
+var QuotaRemindEnabled = true
+var QuotaRemindThreshold = 500000
 var PreConsumedQuota = 500
 var ApproximateTokenEnabled = false
 var EmptyResponseBillingEnabled = true
+
+// MaxPromptTokens 输入 token 上限的粗粒度守卫（仅对 AWS/Bedrock 渠道生效）。
+// AWS 对超过模型上下文窗口（尤其 >1M）的请求既不快速报错也不拒绝，会一直挂起直到
+// 墙钟超时才被砍掉（表现为长时间等待后中断、计费 $0）。在发送上游前用本值预拦截，
+// 直接返回明确的 400。有效上限优先取 model_info.ContextLength(>0)，否则回落到本值。
+// 注意 ContextLength 是整个上下文窗口（含输出侧），这里直接当输入上限使用，不为输出
+// 预留 headroom——作为"防挂死"守卫偏宽松、不会误杀，足够。设为 0 可禁用该守卫。
+var MaxPromptTokens = 1000000
 var DisableTokenEncoders = false
 var RetryTimes = 0
 var RetryTimeOut = 10
 
+// ChannelFailErrorWrapEnabled 是否启用"渠道失败统一封装"。
+// 开启（默认）：FilterOpenAIErr 把所有非 400 上游错误坍缩为 503 + ChannelFailErrorMessage，
+//
+//	对客户端隐藏上游身份、key 状态等内部信息。
+//
+// 关闭：跳过坍缩，上游错误原样透传（仍走 request id 拼接 / Type 隐藏等轻度规整）。
+//
+//	给运维一个"临时关掉看上游真实错误"的口子，便于调试。
+var ChannelFailErrorWrapEnabled = true
+
+// ChannelFailErrorMessage 返回给客户端的统一上游错误文案。
+// 仅在 ChannelFailErrorWrapEnabled 为 true 时生效；留空时回退到 DefaultChannelFailErrorMessage。
+// 通过 GetChannelFailErrorMessage() 取值。
+const DefaultChannelFailErrorMessage = "当前分组上游负载已饱和，请稍后再试"
+
+var ChannelFailErrorMessage = DefaultChannelFailErrorMessage
+
+// GetChannelFailErrorMessage 返回当前配置的统一错误文案；
+// 运维在管理后台清空（空串或纯空白）时回退到默认值，避免客户端收到空 message。
+func GetChannelFailErrorMessage() string {
+	if strings.TrimSpace(ChannelFailErrorMessage) == "" {
+		return DefaultChannelFailErrorMessage
+	}
+	return ChannelFailErrorMessage
+}
+
 // 统一请求响应模型（响应中显示用户请求的原始模型名称）
 var UnifiedRequestResponseModelEnabled = false
+
+// FingerprintPassThroughEnabled 让中转响应尽量保留上游的响应指纹：Claude / Bedrock 的
+// 非流式原始字节透传、流式跳过 model 改写，以及上游响应头透传（Bedrock x-amzn-* /
+// Claude anthropic-ratelimit-* / OpenAI x-ratelimit-* 等）。
+// 默认开启；关闭后回退到与其它渠道一致的结构体序列化行为。
+var FingerprintPassThroughEnabled = true
 
 // 模型名称大小写不敏感匹配
 var ModelNameCaseInsensitiveEnabled = false
@@ -211,12 +264,44 @@ var ModelNameCaseInsensitiveEnabled = false
 var DefaultChannelWeight = uint(1)
 var RetryCooldownSeconds = 5
 
+// RetryCooldownPerStatus stores the JSON source of per-status cooldown overrides,
+// e.g. {"503":120,"502":60}. The parsed map is held in retryCooldownPerStatusMap
+// and accessed via GetRetryCooldownForStatus.
+var RetryCooldownPerStatus = ""
+
+var (
+	retryCooldownPerStatusMap  = map[int]int{}
+	retryCooldownPerStatusLock sync.RWMutex
+)
+
+// SetRetryCooldownPerStatusMap replaces the in-memory map. Called by the option
+// setter after parsing the JSON payload.
+func SetRetryCooldownPerStatusMap(m map[int]int) {
+	retryCooldownPerStatusLock.Lock()
+	defer retryCooldownPerStatusLock.Unlock()
+	retryCooldownPerStatusMap = m
+}
+
+// GetRetryCooldownForStatus returns (seconds, configured). configured=false means
+// the caller should fall through to RetryCooldownSeconds (or skip cooldown entirely
+// depending on the caller's policy).
+func GetRetryCooldownForStatus(statusCode int) (int, bool) {
+	retryCooldownPerStatusLock.RLock()
+	defer retryCooldownPerStatusLock.RUnlock()
+	v, ok := retryCooldownPerStatusMap[statusCode]
+	return v, ok
+}
+
 var CFWorkerImageUrl = ""
 var CFWorkerImageKey = ""
 
 var RootUserEmail = ""
 
 var IsMasterNode = true
+
+// RelayOnly 纯 relay 网关模式：仅暴露转发接口(/v1、/claude、/gemini、/mj 等)与 /health，
+// 前端页面、/api 管理接口、dashboard 一律返回 404，避免从节点泄露主域名等信息。
+var RelayOnly = false
 
 var RequestInterval time.Duration
 
@@ -236,10 +321,11 @@ var GeminiAPIEnabled = true
 var ClaudeAPIEnabled = true
 
 const (
-	RoleGuestUser  = 0
-	RoleCommonUser = 1
-	RoleAdminUser  = 10
-	RoleRootUser   = 100
+	RoleGuestUser    = 0
+	RoleCommonUser   = 1
+	RoleReliableUser = 3 // 可信的内部员工
+	RoleAdminUser    = 10
+	RoleRootUser     = 100
 )
 
 var RateLimitKeyExpirationDuration = 20 * time.Minute
@@ -331,6 +417,7 @@ const (
 	ChannelTypeCodex           = 59
 	ChannelTypeAntigravity     = 60
 	ChannelTypeVertexAIExpress = 61
+	ChannelTypeBedrockMessages = 62
 )
 
 const (

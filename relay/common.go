@@ -13,6 +13,8 @@ import (
 	"done-hub/model"
 	"done-hub/providers"
 	providersBase "done-hub/providers/base"
+	"done-hub/providers/claude"
+	"done-hub/providers/gemini"
 	"done-hub/types"
 	"encoding/json"
 	"errors"
@@ -58,6 +60,8 @@ func Path2Relay(c *gin.Context, path string) RelayBaseInterface {
 		} else {
 			relay = NewRelayGeminiOnly(c)
 		}
+	} else if strings.HasPrefix(path, "/v1/responses/compact") {
+		relay = NewRelayResponsesCompact(c)
 	} else if strings.HasPrefix(path, "/v1/responses") {
 		relay = NewRelayResponses(c)
 	}
@@ -104,6 +108,35 @@ func CheckLimitModel(c *gin.Context, modelName string) error {
 
 	// modelName is not in the allowed models list
 	return fmt.Errorf("Model %s is not supported for current token", modelName)
+}
+
+// errModelNotFoundSentinel 标记"配置层就不可用"的错误，调用方据此选 ModelNotFoundError 而非
+// UpstreamUnavailableError。GetProvider 用 fmt.Errorf("%w: %s", sentinel, modelName) 构造返回，
+// 所以判定必须用 errors.Is 跨 wrap 链识别。
+var errModelNotFoundSentinel = errors.New("model not found")
+
+func IsModelNotFound(err error) bool {
+	return errors.Is(err, errModelNotFoundSentinel)
+}
+
+// shouldReportModelNotFound 决定 GetProvider 全分组失败时是否把错误收敛为 model_not_found。
+// modelName 为空（如 RelayOnly 的 /files、/batches 等无 model 字段端点）时不收敛，避免 sentinel
+// 被 wrap 成 "model not found: " 这种带空尾巴的误导文案传给客户端。
+func shouldReportModelNotFound(allConfigErr bool, modelName string) bool {
+	return allConfigErr && modelName != ""
+}
+
+// isRuntimeChannelErr 命中"模型有配但当前没渠道"的运行时状态，不命中"模型在分组里根本就没配"的配置错误。
+//
+// 4 个 sentinel 来源不同 —— fetchChannelByModel 只 wrap 前两个，后两个是 fetchChannelById 直接产出：
+//   - ErrNoChannelsAvailableSentinel / ErrNoAvailableChannelsAfterFilteringSentinel：来自 NextByValidatedModel，
+//     经 fetchChannelByModel 的 fmt.Errorf("%w ...") wrap，跨层判定必须用 errors.Is。
+//   - ErrInvalidChannelIdSentinel / ErrChannelDisabledSentinel：来自 fetchChannelById，直接返回 sentinel 不 wrap。
+func isRuntimeChannelErr(err error) bool {
+	return errors.Is(err, model.ErrNoChannelsAvailableSentinel) ||
+		errors.Is(err, model.ErrNoAvailableChannelsAfterFilteringSentinel) ||
+		errors.Is(err, model.ErrInvalidChannelIdSentinel) ||
+		errors.Is(err, model.ErrChannelDisabledSentinel)
 }
 
 // buildGroupChain 构建分组降级链
@@ -153,8 +186,19 @@ func GetProvider(c *gin.Context, modelName string) (provider providersBase.Provi
 		return
 	}
 
-	// 保存原始的第一优先级分组（用于日志记录）
+	// originalGroup 必须先取（用于日志和 isBackupGroup 判定）；下面的 validChain 是它的过滤产物。
 	originalGroup := groupChain[0]
+
+	// 剔除 user_group 表里查不到（不存在/已禁用）的分组，避免错误归因到 balancer 的"无可用渠道"模板。
+	missingGroups := make([]string, 0, len(groupChain))
+	validChain := make([]string, 0, len(groupChain))
+	for _, g := range groupChain {
+		if model.GlobalUserGroupRatio.GetBySymbol(g) == nil {
+			missingGroups = append(missingGroups, g)
+			continue
+		}
+		validChain = append(validChain, g)
+	}
 
 	// 尝试每个分组，直到成功获取渠道
 	var lastErr error
@@ -162,12 +206,16 @@ func GetProvider(c *gin.Context, modelName string) (provider providersBase.Provi
 	var channel *model.Channel
 	var usedGroup string
 	var isBackupGroup bool
+	// 任一分组报运行时错误就置 false，最终走 503 保留 SDK 重试；全配置错误才收敛为 model_not_found。
+	allConfigErr := true
+	configErrs := make([]string, 0)
 
-	for i, groupName := range groupChain {
+	for _, groupName := range validChain {
 		matchedModelName, err := model.ChannelGroup.GetMatchedModelName(groupName, modelName)
 		if err != nil {
 			lastErr = err
-			continue // 尝试下一个分组
+			configErrs = append(configErrs, fmt.Sprintf("%s: %v", model.GlobalUserGroupRatio.GetDisplayNameWithStatus(groupName), err))
+			continue // 配置类，allConfigErr 不变
 		}
 
 		actualModelName = matchedModelName
@@ -177,18 +225,42 @@ func GetProvider(c *gin.Context, modelName string) (provider providersBase.Provi
 		channel, err = fetchChannel(c, actualModelName)
 		if err != nil {
 			lastErr = err
+			if isRuntimeChannelErr(err) {
+				allConfigErr = false
+			} else {
+				configErrs = append(configErrs, fmt.Sprintf("%s: %v", model.GlobalUserGroupRatio.GetDisplayNameWithStatus(groupName), err))
+			}
 			continue // 尝试下一个分组
 		}
 
 		// 成功获取渠道
 		usedGroup = groupName
-		isBackupGroup = (i > 0) // 如果不是第一个分组，说明使用了降级分组
+		isBackupGroup = (groupName != originalGroup) // 不是原始第一优先级分组，说明走了降级
 
 		break
 	}
 
 	// 所有分组都失败
 	if channel == nil {
+		// 循环里 c.Set("token_group", groupName) 会污染 context；失败时还原到调用方传入的原始值，
+		// 避免下游中间件（含未来新增的 post-fail 处理）读到"最后一次尝试的分组"。
+		c.Set("token_group", tokenGroup)
+
+		// 全是配置错误（含分组不存在/禁用）→ model_not_found，让 SDK 不重试；详情进日志。
+		// modelName="" 时（RelayOnly 路径）由 shouldReportModelNotFound 拦掉，避免空尾巴文案。
+		if shouldReportModelNotFound(allConfigErr, modelName) {
+			displayMissing := make([]string, len(missingGroups))
+			for i, g := range missingGroups {
+				displayMissing[i] = model.GlobalUserGroupRatio.GetDisplayNameWithStatus(g)
+			}
+			logger.LogError(c.Request.Context(), fmt.Sprintf(
+				"model_not_found user=%d model=%s original_group=%s missing_groups=%v config_errs=%v",
+				c.GetInt("id"), modelName, originalGroup, displayMissing, configErrs,
+			))
+			fail = fmt.Errorf("%w: %s", errModelNotFoundSentinel, modelName)
+			return
+		}
+
 		fail = lastErr
 		if fail == nil {
 			fail = errors.New("所有分组都无可用渠道")
@@ -248,10 +320,10 @@ func fetchChannel(c *gin.Context, modelName string) (channel *model.Channel, fai
 func fetchChannelById(channelId int) (*model.Channel, error) {
 	channel, err := model.GetChannelById(channelId)
 	if err != nil {
-		return nil, errors.New(model.ErrInvalidChannelId)
+		return nil, model.ErrInvalidChannelIdSentinel
 	}
 	if channel.Status != config.ChannelStatusEnabled {
-		return nil, errors.New(model.ErrChannelDisabled)
+		return nil, model.ErrChannelDisabledSentinel
 	}
 
 	return channel, nil
@@ -289,7 +361,13 @@ func fetchChannelByModel(c *gin.Context, modelName string) (*model.Channel, erro
 	// 传递 gin.Context 给 balancer，用于生成 session hash
 	channel, err := model.ChannelGroup.NextByValidatedModel(group, modelName, c, filters...)
 	if err != nil {
-		// 这里只处理渠道相关的错误，模型匹配错误已在上层处理
+		// 这里只判 NextByValidatedModel 自产的两个 sentinel；isRuntimeChannelErr 还列了另外 2 个
+		// （ErrInvalidChannelIdSentinel / ErrChannelDisabledSentinel）来自 fetchChannelById 直接返回，不经此分支。
+		// 命中 runtime sentinel 时显式 wrap 出来，否则会落到下方默认分支被 errors.New(message) 重建，
+		// sentinel 链断裂导致上层 isRuntimeChannelErr 漏判，渠道全冷却 / 状态异常会被误收敛成 model_not_found（SDK 不重试）。
+		if errors.Is(err, model.ErrNoChannelsAvailableSentinel) || errors.Is(err, model.ErrNoAvailableChannelsAfterFilteringSentinel) {
+			return nil, fmt.Errorf("%w (group=%s model=%s)", err, group, modelName)
+		}
 		message := fmt.Sprintf(model.ErrNoAvailableChannelForModel, model.GlobalUserGroupRatio.GetDisplayName(group), modelName)
 		if channel != nil {
 			logger.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))
@@ -301,7 +379,101 @@ func fetchChannelByModel(c *gin.Context, modelName string) (*model.Channel, erro
 	return channel, nil
 }
 
+// unifyResponseModel 在响应写出前统一把含 model 字段的响应对象改写为用户原始请求模型名。
+// 仅在 UnifiedRequestResponseModelEnabled 开启且 context 存在 original_model 时生效（由
+// GetResponseModelNameFromContext 内部判断）；未启用时返回原值，幂等无副作用。
+// 这是所有非流式 JSON 响应（chat/completions/embeddings/moderations/rerank/responses/claude/gemini）
+// 的统一出口拦截点，避免逐个 provider 手动改写导致的覆盖遗漏。
+func unifyResponseModel(c *gin.Context, data interface{}) {
+	switch v := data.(type) {
+	case *types.ChatCompletionResponse:
+		v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+	case *types.CompletionResponse:
+		v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+	case *types.EmbeddingResponse:
+		v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+	case *types.ModerationResponse:
+		v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+	case *types.RerankResponse:
+		v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+	case *types.OpenAIResponsesResponses:
+		v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+	case *claude.ClaudeResponse:
+		v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+	case *gemini.GeminiChatResponse:
+		// Gemini 原生响应回显的是 modelVersion；同时存在 model 字段，二者都按需改写。
+		// 仅当原值非空时改写，避免给本不含该字段的响应凭空注入。
+		if v.ModelVersion != "" {
+			v.ModelVersion = providersBase.GetResponseModelNameFromContext(c, v.ModelVersion)
+		}
+		if v.Model != "" {
+			v.Model = providersBase.GetResponseModelNameFromContext(c, v.Model)
+		}
+	}
+}
+
+// applyPassThroughHeaders 把 provider 暂存的上游响应头（Bedrock 的 x-amzn-* /
+// Claude 的 anthropic-ratelimit-* 等）写入下游响应，并把上游 request-id 以
+// X-Upstream-Request-Id 回写。必须在 WriteHeader 之前调用；未暂存对应 key 的渠道无影响。
+func applyPassThroughHeaders(c *gin.Context) {
+	if v, ok := c.Get(config.GinPassThroughHeaders); ok {
+		if headers, ok := v.(http.Header); ok {
+			for name, values := range headers {
+				for _, value := range values {
+					c.Writer.Header().Add(name, value)
+				}
+			}
+		}
+	}
+	// 采集与落库不看指纹开关（hook 挂在 base.SetContext 上，恒采集），排障始终有据可查；
+	// 但回写给客户端是对外暴露上游痕迹，运营者关掉指纹透传的意图正是不让响应带上游信息，
+	// 故开关判断落在这里而非采集侧——关掉开关只影响响应头，不影响 logs 落库。
+	if config.FingerprintPassThroughEnabled {
+		if v, ok := c.Get(config.GinUpstreamRequestIdKey); ok {
+			if requestID, ok := v.(string); ok && requestID != "" {
+				c.Writer.Header().Set("X-Upstream-Request-Id", requestID)
+			}
+		}
+	}
+}
+
+// writeRawResponseBodyIfPresent 若 provider 暂存了上游原始响应字节，则直接透传，
+// 保留上游的字段顺序 / 未知字段 / model 原名，避免结构体 re-marshal 洗掉指纹。
+// 两个 key 都会同时透传上游响应头（Bedrock x-amzn-* / Claude anthropic-* 等）。
+// 命中并写出时返回 true，调用方应据此提前返回。
+func writeRawResponseBodyIfPresent(c *gin.Context) bool {
+	rawKeys := []string{
+		config.GinBedrockRawResponseBodyKey,
+		config.GinRawResponseBodyKey,
+	}
+	for _, key := range rawKeys {
+		raw, ok := c.Get(key)
+		if !ok {
+			continue
+		}
+		rawBytes, ok := raw.([]byte)
+		if !ok || len(rawBytes) == 0 {
+			continue
+		}
+		applyPassThroughHeaders(c)
+		c.Writer.Header().Set("Content-Type", "application/json")
+		c.Writer.WriteHeader(http.StatusOK)
+		if _, err := c.Writer.Write(rawBytes); err != nil {
+			logger.LogError(c.Request.Context(), "write_response_body_failed:"+err.Error())
+		}
+		return true
+	}
+	return false
+}
+
 func responseJsonClient(c *gin.Context, data interface{}) *types.OpenAIErrorWithStatusCode {
+	if writeRawResponseBodyIfPresent(c) {
+		return nil
+	}
+
+	// 统一改写响应里的 model 字段为用户原始请求模型名（开关开启且存在映射时）
+	unifyResponseModel(c, data)
+
 	// 将data转换为 JSON，禁用 HTML 转义以避免 & 被转为 \u0026
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
@@ -315,6 +487,8 @@ func responseJsonClient(c *gin.Context, data interface{}) *types.OpenAIErrorWith
 	// Encode 会在末尾添加换行符，需要去掉
 	responseBody := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 
+	// 结构体改写分支（有模型映射，未走字节透传）同样透传上游响应头，必须在 WriteHeader 之前。
+	applyPassThroughHeaders(c)
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(http.StatusOK)
 	_, err = c.Writer.Write(responseBody)
@@ -329,6 +503,8 @@ type StreamEndHandler func() string
 
 func responseStreamClient(c *gin.Context, stream requester.StreamReaderInterface[string], endHandler StreamEndHandler) (firstResponseTime time.Time, errWithOP *types.OpenAIErrorWithStatusCode) {
 	requester.SetEventStreamHeaders(c)
+	// 指纹保真：透传上游响应头（OpenAI x-ratelimit-* 等）。必须在首次写入前设置。
+	applyPassThroughHeaders(c)
 	dataChan, errChan := stream.Recv()
 
 	done := make(chan struct{})
@@ -396,6 +572,8 @@ func responseStreamClient(c *gin.Context, stream requester.StreamReaderInterface
 
 func responseGeneralStreamClient(c *gin.Context, stream requester.StreamReaderInterface[string], endHandler StreamEndHandler) (firstResponseTime time.Time) {
 	requester.SetEventStreamHeaders(c)
+	// 指纹保真：透传上游响应头（Bedrock x-amzn-* / Claude anthropic-* 等）。必须在首次写入前设置。
+	applyPassThroughHeaders(c)
 	dataChan, errChan := stream.Recv()
 
 	done := make(chan struct{})
@@ -515,10 +693,10 @@ func shouldRetry(c *gin.Context, apiErr *types.OpenAIErrorWithStatusCode, channe
 	switch apiErr.StatusCode {
 	case http.StatusTooManyRequests, http.StatusTemporaryRedirect:
 		return true
-	case http.StatusRequestTimeout, http.StatusGatewayTimeout, 524:
+	case http.StatusRequestTimeout:
 		return false
 	case http.StatusBadRequest:
-		return shouldRetryBadRequest(channelType, apiErr)
+		return shouldRetryBadRequest(c, channelType, apiErr)
 	}
 
 	if apiErr.StatusCode/100 == 5 {
@@ -531,15 +709,51 @@ func shouldRetry(c *gin.Context, apiErr *types.OpenAIErrorWithStatusCode, channe
 	return true
 }
 
-func shouldRetryBadRequest(channelType int, apiErr *types.OpenAIErrorWithStatusCode) bool {
+func shouldRetryBadRequest(c *gin.Context, channelType int, apiErr *types.OpenAIErrorWithStatusCode) bool {
 	switch channelType {
-	case config.ChannelTypeAnthropic:
+	case config.ChannelTypeAnthropic, config.ChannelTypeBedrockMessages:
 		return strings.Contains(apiErr.OpenAIError.Message, "Your credit balance is too low")
 	case config.ChannelTypeBedrock:
 		return strings.Contains(apiErr.OpenAIError.Message, "Operation not allowed")
 	default:
-		// gemini
-		if apiErr.OpenAIError.Param == "INVALID_ARGUMENT" && strings.Contains(apiErr.OpenAIError.Message, "API key not valid") {
+		// gemini: 单渠道密钥失效属于"该渠道的问题"，应继续重试其他渠道而不是终止整条链。
+		// 上游已知的 message 变体（大小写不统一，故全部 ToLower 后匹配）：
+		//   - "API key not valid. Please pass a valid API key."
+		//   - "API Key not found. Please pass a valid API key."
+		//   - "API key expired. Please renew the API key."
+		// 注意：reason=API_KEY_INVALID 来自 errorInfo.Details[].Reason，不会进 Message，
+		// 因此这里只匹配 Message 文案，不要尝试匹配 reason 字符串。
+		if apiErr.OpenAIError.Param == "INVALID_ARGUMENT" {
+			msg := strings.ToLower(apiErr.OpenAIError.Message)
+			if strings.Contains(msg, "api key not valid") ||
+				strings.Contains(msg, "api key not found") ||
+				strings.Contains(msg, "api key expired") {
+				return true
+			}
+		}
+		// Gemini 3 thoughtSignature 不可用：客户端 history 携带的签名在当前 channel/account
+		// 上无法校验，上游回 400。文案有多种变体（"Thought signature is not valid" /
+		// "Corrupted thought signature" / …），统一由 gemini.IsThoughtSignatureFailure 判定，
+		// 不再逐字符串硬编码。
+		//
+		// 这里刻意不再要求 Param == "INVALID_ARGUMENT"：不同文案对应的 errorInfo.status
+		// 不完全一致（如 corrupted 一类可能落在别的枚举），而补救手段都相同，因此只以
+		// 消息语义为准；无限重试由 thought_signature_retried 幂等标志兜底。
+		//
+		// 首次撞到（thought_signature_retried 未置）：在此置标志位并返回 true，进入 retry
+		// 循环，retry 前由 relayGeminiOnly.handleThoughtSignatureFailure 将请求里的
+		// thoughtSignature 替换为官方哨兵 skip_thought_signature_validator。已剥过哨兵还挂
+		// 说明上游有别的问题，不再死磕。
+		//
+		// 标志位置位由 shouldRetryBadRequest 集中负责（而非 handleX），保证：
+		//   - "决定是否重试" 与 "改写 body" 的责任分离
+		//   - 即使没有 bytes 缓存（如不带签名的请求误命中），也不会因 handleX 走空路径
+		//     而漏置标志位、退化为无限重试
+		if gemini.IsThoughtSignatureFailure(apiErr.OpenAIError.Message) {
+			if c.GetBool("thought_signature_retried") {
+				return false
+			}
+			c.Set("thought_signature_retried", true)
 			return true
 		}
 		return false
@@ -554,20 +768,81 @@ func processChannelRelayError(ctx context.Context, channelId int, channelName st
 	}
 }
 
-var (
-	requestIdRegex = regexp.MustCompile(`\(request id: [^\)]+\)`)
-	quotaKeywords  = []string{"余额", "额度", "quota", model.KeywordNoAvailableChannel, "令牌"}
-)
+// notifyChannelRelayError 是所有有重试循环的入口（main.go / recraftAI.go / rerank.go 等）
+// 在拿到上游失败 apiErr 后的统一通知入口：
+//   - 异步触发 processChannelRelayError（判断是否要永久禁用渠道）
+//   - 记录 429 信号（upstream_seen_429）供 FilterOpenAIErr 坍缩时保留 status code，
+//     让客户端 SDK 的标准退避算法生效
+//
+// 把两件事绑在一起，未来加新入口只要调一次，从机制上消除"漏调一个就丢 429 信号"的脆弱约定。
+func notifyChannelRelayError(ctx context.Context, c *gin.Context, channel *model.Channel, apiErr *types.OpenAIErrorWithStatusCode) {
+	go processChannelRelayError(ctx, channel.Id, channel.Name, apiErr, channel.Type)
+	if apiErr != nil && apiErr.StatusCode == http.StatusTooManyRequests {
+		c.Set("upstream_seen_429", true)
+	}
+}
+
+var requestIdRegex = regexp.MustCompile(`\(request id: [^\)]+\)`)
 
 func FilterOpenAIErr(c *gin.Context, err *types.OpenAIErrorWithStatusCode) (errWithStatusCode types.OpenAIErrorWithStatusCode) {
+	// 兜底脱敏:在最终返回前统一对 Message 脱敏,避免逐条 return 漏改。
+	// skipMask=true 时跳过——管理员在后台配置的 ChannelFailErrorMessage 属于受信内容，
+	// 运维若特意写了 support@x.com 这类联系方式，不应被脱敏成 ***。
+	skipMask := false
+	defer func() {
+		if !skipMask {
+			errWithStatusCode.OpenAIError.Message = utils.MaskSensitiveInfo(errWithStatusCode.OpenAIError.Message)
+		}
+	}()
+
 	newErr := types.OpenAIErrorWithStatusCode{}
 	if err != nil {
 		newErr = *err
 	}
 
-	if newErr.StatusCode == http.StatusTooManyRequests {
-		newErr.OpenAIError.Message = "当前分组上游负载已饱和，请稍后再试"
+	// 客户端可见错误白名单：仅 400 透传上游原文（参数错误对客户端有意义），
+	// 其余统一坍缩为 503 + 固定文案，避免客户端通过 status code 或 message 差异
+	// 反推上游身份/key 状态/路径等内部信息。
+	// 坍缩范围：
+	//   1) 非 LocalError 且 status != 400：所有上游返回的非 400 错误（401/403/404/429/5xx）
+	//   2) LocalError 且 type == "upstream_unavailable"：路由阶段无渠道、重试超时等
+	//      "渠道整体不可用"语义的本地错误（消息体仍保留用于内部日志诊断）
+	// 其余 LocalError（参数错误、计费错误等）走原路径，文案本就是我们自己写的。
+	// 总开关 ChannelFailErrorWrapEnabled 关闭时跳过坍缩，让运维能临时看到上游真实错误用于调试。
+	collapse := config.ChannelFailErrorWrapEnabled &&
+		((!newErr.LocalError && newErr.StatusCode != http.StatusBadRequest) ||
+			(newErr.LocalError && newErr.OpenAIError.Type == "upstream_unavailable"))
+	if collapse {
+		// 坍缩 message 来自管理员后台配置，跳过脱敏。
+		skipMask = true
+		requestId := c.GetString(logger.RequestIdKey)
+		// 默认坍缩到 503；保留 429 的两个触发源：
+		//   - upstream_seen_429：main.go 重试循环里检测到的"链中曾出现过 429"
+		//   - newErr.StatusCode == 429：单次入口（relay/relay.go RelayOnly、relay/recraftAI.go 等）的最终错误是 429
+		// OR 兜底确保所有路径都能保留 429 让客户端 SDK 的标准退避算法生效。
+		// message 仍统一为自定义文案，隐藏上游 provider 名/key 状态等内部信息。
+		statusCode := http.StatusServiceUnavailable
+		errCode := "service_unavailable"
+		if c.GetBool("upstream_seen_429") || newErr.StatusCode == http.StatusTooManyRequests {
+			statusCode = http.StatusTooManyRequests
+			errCode = "rate_limit_exceeded"
+		}
+		return types.OpenAIErrorWithStatusCode{
+			StatusCode: statusCode,
+			OpenAIError: types.OpenAIError{
+				Type:    "system_error",
+				Code:    errCode,
+				Message: utils.MessageWithRequestId(config.GetChannelFailErrorMessage(), requestId),
+			},
+		}
 	}
+
+	// 至此 newErr 落到此分支的两类情况：
+	//   1) ChannelFailErrorWrapEnabled=true 的残余路径：
+	//      - !LocalError && StatusCode == 400：上游 400 透传给客户端（参数错误对其有意义）
+	//      - LocalError 且 type != upstream_unavailable：本地参数/计费/token 等业务错误，文案本就是我们自己写的
+	//   2) ChannelFailErrorWrapEnabled=false（运维临时关掉调试）：所有错误都落到这里，包括上游 4xx/5xx 与 upstream_unavailable 类 LocalError
+	// 这里做最后的轻度规整：拼 request id、隐藏暴露上游身份或内部 sentinel 的 type 标签、修补 bad_response_status_code 文案。
 
 	// 如果message中已经包含 request id: 则不再添加
 	if strings.Contains(newErr.Message, "(request id:") {
@@ -577,127 +852,12 @@ func FilterOpenAIErr(c *gin.Context, err *types.OpenAIErrorWithStatusCode) (errW
 	requestId := c.GetString(logger.RequestIdKey)
 	newErr.OpenAIError.Message = utils.MessageWithRequestId(newErr.OpenAIError.Message, requestId)
 
-	channelType := c.GetInt("channel_type")
-
-	// GeminiCli 错误处理（优先处理，避免被通用逻辑覆盖）
-	if channelType == config.ChannelTypeGeminiCli && !newErr.LocalError {
-		if newErr.OpenAIError.Type == "geminicli_error" || newErr.OpenAIError.Type == "geminicli_token_error" {
-			if newErr.StatusCode == http.StatusUnauthorized || newErr.StatusCode == http.StatusForbidden {
-				if cachedErr, exists := c.Get("first_non_auth_error"); exists {
-					if firstErr, ok := cachedErr.(*types.OpenAIErrorWithStatusCode); ok {
-						newErr = *firstErr
-						if newErr.OpenAIError.Type == "geminicli_error" {
-							newErr.OpenAIError.Type = "system_error"
-						}
-						newErr.OpenAIError.Message = utils.MessageWithRequestId(newErr.OpenAIError.Message, requestId)
-						return newErr
-					}
-				}
-				if newErr.StatusCode == http.StatusUnauthorized {
-					newErr.OpenAIError.Type = "authentication_error"
-				} else {
-					newErr.OpenAIError.Type = "access_denied"
-				}
-				newErr.OpenAIError.Message = utils.MessageWithRequestId("上游负载已饱和，请稍后再试", requestId)
-				newErr.StatusCode = http.StatusTooManyRequests
-				return newErr
-			} else {
-				newErr.OpenAIError.Type = "system_error"
-			}
-		}
-	}
-
-	// ClaudeCode 错误处理（优先处理，避免被通用逻辑覆盖）
-	if channelType == config.ChannelTypeClaudeCode && !newErr.LocalError {
-		if newErr.OpenAIError.Type == "claudecode_error" || newErr.OpenAIError.Type == "claudecode_token_error" {
-			if newErr.StatusCode == http.StatusUnauthorized || newErr.StatusCode == http.StatusForbidden {
-				if cachedErr, exists := c.Get("first_non_auth_error"); exists {
-					if firstErr, ok := cachedErr.(*types.OpenAIErrorWithStatusCode); ok {
-						newErr = *firstErr
-						if newErr.OpenAIError.Type == "claudecode_error" {
-							newErr.OpenAIError.Type = "system_error"
-						}
-						newErr.OpenAIError.Message = utils.MessageWithRequestId(newErr.OpenAIError.Message, requestId)
-						return newErr
-					}
-				}
-				if newErr.StatusCode == http.StatusUnauthorized {
-					newErr.OpenAIError.Type = "authentication_error"
-				} else {
-					newErr.OpenAIError.Type = "access_denied"
-				}
-				newErr.OpenAIError.Message = utils.MessageWithRequestId("上游负载已饱和，请稍后再试", requestId)
-				newErr.StatusCode = http.StatusTooManyRequests
-				return newErr
-			} else {
-				newErr.OpenAIError.Type = "system_error"
-			}
-		}
-	}
-
-	// Codex 错误处理（优先处理，避免被通用逻辑覆盖）
-	if channelType == config.ChannelTypeCodex && !newErr.LocalError {
-		if newErr.OpenAIError.Type == "codex_error" || newErr.OpenAIError.Type == "codex_token_error" {
-			if newErr.StatusCode == http.StatusUnauthorized || newErr.StatusCode == http.StatusForbidden {
-				if cachedErr, exists := c.Get("first_non_auth_error"); exists {
-					if firstErr, ok := cachedErr.(*types.OpenAIErrorWithStatusCode); ok {
-						newErr = *firstErr
-						if newErr.OpenAIError.Type == "codex_error" {
-							newErr.OpenAIError.Type = "system_error"
-						}
-						newErr.OpenAIError.Message = utils.MessageWithRequestId(newErr.OpenAIError.Message, requestId)
-						return newErr
-					}
-				}
-				if newErr.StatusCode == http.StatusUnauthorized {
-					newErr.OpenAIError.Type = "authentication_error"
-				} else {
-					newErr.OpenAIError.Type = "access_denied"
-				}
-				newErr.OpenAIError.Message = utils.MessageWithRequestId("上游负载已饱和，请稍后再试", requestId)
-				newErr.StatusCode = http.StatusTooManyRequests
-				return newErr
-			} else {
-				newErr.OpenAIError.Type = "system_error"
-			}
-		}
-	}
-
-	// Antigravity 错误处理（优先处理，避免被通用逻辑覆盖）
-	if channelType == config.ChannelTypeAntigravity && !newErr.LocalError {
-		if newErr.OpenAIError.Type == "antigravity_error" || newErr.OpenAIError.Type == "antigravity_token_error" {
-			if newErr.StatusCode == http.StatusUnauthorized || newErr.StatusCode == http.StatusForbidden {
-				if cachedErr, exists := c.Get("first_non_auth_error"); exists {
-					if firstErr, ok := cachedErr.(*types.OpenAIErrorWithStatusCode); ok {
-						newErr = *firstErr
-						if newErr.OpenAIError.Type == "antigravity_error" {
-							newErr.OpenAIError.Type = "system_error"
-						}
-						newErr.OpenAIError.Message = utils.MessageWithRequestId(newErr.OpenAIError.Message, requestId)
-						return newErr
-					}
-				}
-				if newErr.StatusCode == http.StatusUnauthorized {
-					newErr.OpenAIError.Type = "authentication_error"
-				} else {
-					newErr.OpenAIError.Type = "access_denied"
-				}
-				newErr.OpenAIError.Message = utils.MessageWithRequestId("上游负载已饱和，请稍后再试", requestId)
-				newErr.StatusCode = http.StatusTooManyRequests
-				return newErr
-			} else {
-				newErr.OpenAIError.Type = "system_error"
-			}
-		}
-	}
-
-	// 通用错误处理
-	if !newErr.LocalError && (newErr.OpenAIError.Type == "one_hub_error" || strings.HasSuffix(newErr.OpenAIError.Type, "_api_error")) {
+	// 隐藏暴露上游身份或仅供内部使用的 type 标签：
+	//   - one_hub_error / *_api_error：暴露上游 SDK 身份（anthropic_api_error 等）
+	//   - upstream_unavailable：internal sentinel，仅用于 collapse 路由；关闭开关调试时不应漏给客户端
+	if newErr.OpenAIError.Type == "upstream_unavailable" ||
+		(!newErr.LocalError && (newErr.OpenAIError.Type == "one_hub_error" || strings.HasSuffix(newErr.OpenAIError.Type, "_api_error"))) {
 		newErr.OpenAIError.Type = "system_error"
-		if utils.ContainsString(newErr.Message, quotaKeywords) {
-			newErr.Message = "上游负载已饱和，请稍后再试"
-			newErr.StatusCode = http.StatusTooManyRequests
-		}
 	}
 
 	if code, ok := newErr.OpenAIError.Code.(string); ok && code == "bad_response_status_code" && !strings.Contains(newErr.OpenAIError.Message, "bad response status code") {

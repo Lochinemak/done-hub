@@ -5,6 +5,7 @@ import (
 	"done-hub/common"
 	"done-hub/common/logger"
 	"done-hub/common/requester"
+	"done-hub/providers/base"
 	"done-hub/providers/gemini"
 	"done-hub/types"
 	"encoding/json"
@@ -12,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // CreateGeminiChat 创建Gemini格式的聊天（非流式）
@@ -45,6 +48,15 @@ func (p *AntigravityProvider) CreateGeminiChat(request *gemini.GeminiChatRequest
 	usage := p.GetUsage()
 	*usage = gemini.ConvertOpenAIUsage(geminiResponse.UsageMetadata)
 
+	// 与 gemini.CreateGeminiChat 的非流式兜底对齐：上游漏返/裁掉 usageMetadata 时 CompletionTokens 归零，
+	// 用响应内容估算避免计费归零。原生非流式不写 TextBuilder，relay/main.go 的全局兜底覆盖不到。
+	if usage.CompletionTokens == 0 {
+		if text := gemini.BillingPartsText(geminiResponse.Candidates); text != "" {
+			usage.CompletionTokens = common.CountTokenText(text, request.Model)
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+		}
+	}
+
 	return geminiResponse, nil
 }
 
@@ -63,6 +75,7 @@ func (p *AntigravityProvider) CreateGeminiChatStream(request *gemini.GeminiChatR
 		Usage:     p.Usage,
 		ModelName: request.Model,
 		Prefix:    `data: `,
+		Context:   p.Context,
 		Key:       channel.Key,
 	}
 
@@ -85,6 +98,7 @@ type AntigravityRelayStreamHandler struct {
 	Usage     *types.Usage
 	Prefix    string
 	ModelName string
+	Context   *gin.Context
 	Key       string
 }
 
@@ -137,6 +151,10 @@ func (h *AntigravityRelayStreamHandler) HandlerStream(rawLine *[]byte, dataChan 
 		return
 	}
 
+	// 累积流式内容到 TextBuilder，用于 UsageMetadata 缺失/被裁时 relay/main.go 的全局兜底估算 completion，
+	// 避免计费归零。本 handler 不写则兜不到（全局兜底靠 TextBuilder.Len()>0）。口径与直连 gemini 一致。
+	h.Usage.TextBuilder.WriteString(gemini.BillingPartsText(geminiResponse.Candidates))
+
 	// 更新 usage
 	if geminiResponse.UsageMetadata != nil {
 		h.Usage.PromptTokens = geminiResponse.UsageMetadata.PromptTokenCount
@@ -155,6 +173,16 @@ func (h *AntigravityRelayStreamHandler) HandlerStream(rawLine *[]byte, dataChan 
 			totalTokens = geminiResponse.UsageMetadata.PromptTokenCount + completionTokens
 		}
 		h.Usage.TotalTokens = totalTokens
+	}
+
+	// 统一请求响应模型：本 handler 已把响应反序列化成结构体并整体重新序列化，
+	// 直接改 ModelVersion / Model 两个字段即可（与非流式 relay.unifyResponseModel 的 Gemini 分支一致）。
+	// 仅在原值非空时改写，避免给本不含该字段的响应凭空注入。
+	if geminiResponse.ModelVersion != "" {
+		geminiResponse.ModelVersion = base.GetResponseModelNameFromContext(h.Context, geminiResponse.ModelVersion)
+	}
+	if geminiResponse.Model != "" {
+		geminiResponse.Model = base.GetResponseModelNameFromContext(h.Context, geminiResponse.Model)
 	}
 
 	// 重新序列化实际的 Gemini 响应并转发

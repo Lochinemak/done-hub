@@ -5,6 +5,7 @@ import LockIcon from '@mui/icons-material/Lock';
 import { Icon } from '@iconify/react';
 import { useTranslation } from 'react-i18next';
 import { ValueFormatter } from 'utils/common';
+import { stickyCellSx } from 'ui-component/stickyCellSx';
 
 const PricesTableRow = ({ item, onEdit, onDelete, ownedby, unit = 'K' }) => {
   const { t } = useTranslation();
@@ -20,8 +21,8 @@ const PricesTableRow = ({ item, onEdit, onDelete, ownedby, unit = 'K' }) => {
       theme.palette.info.main,
       theme.palette.warning.main
     ];
-    // 根据channel_type确定颜色
-    return colors[(item.channel_type - 1) % colors.length];
+    // 根据channel_type确定颜色（channel_type 可能为 0/未知，取模前先归一化避免负索引）
+    return colors[(((item.channel_type - 1) % colors.length) + colors.length) % colors.length];
   };
 
   const channelColor = getChannelColor();
@@ -48,7 +49,7 @@ const PricesTableRow = ({ item, onEdit, onDelete, ownedby, unit = 'K' }) => {
   // 获取渠道名称
   const getChannelName = (channelType) => {
     const channel = ownedby.find((item) => item.value === channelType);
-    return channel?.label || 'unknown';
+    return channel?.label || t('common.unknown');
   };
 
   // 格式化价格
@@ -78,7 +79,9 @@ const PricesTableRow = ({ item, onEdit, onDelete, ownedby, unit = 'K' }) => {
     const ratioNames = {
       cached_tokens: t('modelpricePage.cached_tokens'),
       cached_write_tokens: t('modelpricePage.cached_write_tokens'),
+      cached_write_1h_tokens: t('modelpricePage.cached_write_1h_tokens'),
       cached_read_tokens: t('modelpricePage.cached_read_tokens'),
+      openai_cache_write_tokens: t('modelpricePage.openai_cache_write_tokens'),
       input_audio_tokens: t('modelpricePage.input_audio_tokens'),
       output_audio_tokens: t('modelpricePage.output_audio_tokens'),
       reasoning_tokens: t('modelpricePage.reasoning_tokens'),
@@ -314,7 +317,11 @@ const PricesTableRow = ({ item, onEdit, onDelete, ownedby, unit = 'K' }) => {
       </TableCell>
 
       {/* 操作按钮 */}
-      <TableCell width="10%" align="right" sx={{ pr: 2 }}>
+      <TableCell
+        width="10%"
+        align="right"
+        sx={{ pr: 2, ...stickyCellSx }}
+      >
         <Stack
           direction="row"
           spacing={0.5}
