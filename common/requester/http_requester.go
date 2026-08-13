@@ -26,6 +26,9 @@ type HTTPRequester struct {
 	proxyAddr         string
 	Context           context.Context
 	IsOpenAI          bool
+	// ResponseHook 在收到上游响应后、错误状态判定前调用（成功与失败响应都触发），
+	// 用于统一采集上游响应头（如 request-id）。为 nil 时跳过。
+	ResponseHook func(*http.Response)
 }
 
 // NewHTTPRequester 创建一个新的 HTTPRequester 实例。
@@ -86,6 +89,10 @@ func (r *HTTPRequester) SendRequest(req *http.Request, response any, outputResp 
 		return nil, common.ErrorWrapper(err, "http_request_failed", http.StatusInternalServerError)
 	}
 
+	if r.ResponseHook != nil {
+		r.ResponseHook(resp)
+	}
+
 	if !outputResp {
 		defer resp.Body.Close()
 	}
@@ -101,14 +108,26 @@ func (r *HTTPRequester) SendRequest(req *http.Request, response any, outputResp 
 	}
 
 	if outputResp {
-		var buf bytes.Buffer
-		tee := io.TeeReader(resp.Body, &buf)
-		err = DecodeResponse(tee, response)
+		// 先 ReadAll 拿到完整原始字节，再从字节副本解析：TeeReader+Decoder 只镜像
+		// Decoder 已读取的部分，响应末尾字节（尾随 \n / 空白）可能不进副本，导致回填
+		// 给客户端的字节与上游不完全一致。指纹保真要求字节级一致，故整份读入后原样回填。
+		var bodyBytes []byte
+		bodyBytes, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, common.ErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+		}
+		err = DecodeResponse(bytes.NewReader(bodyBytes), response)
 
-		// 将响应体重新写入 resp.Body
-		resp.Body = io.NopCloser(&buf)
+		// 将原始字节原样重新写入 resp.Body
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	} else {
-		err = json.NewDecoder(resp.Body).Decode(response)
+		// ReadAll → Unmarshal：Decode 解到完整值就返回，会吞掉 body 末端的传输错误；ReadAll 强制读到 EOF 才能稳定捕获。
+		var bodyBytes []byte
+		bodyBytes, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, common.ErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+		}
+		err = json.Unmarshal(bodyBytes, response)
 	}
 
 	if err != nil {
@@ -124,6 +143,10 @@ func (r *HTTPRequester) SendRequestRaw(req *http.Request) (*http.Response, *type
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return nil, common.ErrorWrapper(err, "http_request_failed", http.StatusInternalServerError)
+	}
+
+	if r.ResponseHook != nil {
+		r.ResponseHook(resp)
 	}
 
 	// 处理响应

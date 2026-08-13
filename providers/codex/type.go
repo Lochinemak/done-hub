@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"done-hub/common/logger"
+	"done-hub/common/utils"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -105,14 +106,14 @@ func (c *OAuth2Credentials) Refresh(ctx context.Context, proxyURL string, maxRet
 			Timeout: 30 * time.Second,
 		}
 
-		// 如果有代理配置，设置代理
+		// 如果有代理配置，设置代理（支持 http/https/socks5）
 		if proxyURL != "" {
-			proxyURLParsed, err := url.Parse(proxyURL)
-			if err == nil {
-				client.Transport = &http.Transport{
-					Proxy: http.ProxyURL(proxyURLParsed),
-				}
+			proxyClient, err := utils.NewProxyHTTPClient(proxyURL)
+			if err != nil {
+				return fmt.Errorf("failed to create proxy http client: %w", err)
 			}
+			proxyClient.Timeout = 30 * time.Second
+			client = proxyClient
 		}
 
 		// 发送刷新请求
@@ -123,7 +124,7 @@ func (c *OAuth2Credentials) Refresh(ctx context.Context, proxyURL string, maxRet
 		}
 
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("User-Agent", "codex_cli_rs/0.38.0 (Ubuntu 22.4.0; x86_64) WindowsTerminal")
+		req.Header.Set("User-Agent", DefaultCodexUserAgent)
 		req.Header.Set("Accept", "application/json, text/plain, */*")
 
 		resp, err := client.Do(req)

@@ -249,12 +249,13 @@ func (candidate *GeminiChatCandidate) ToOpenAIStreamChoice(request *types.ChatCo
 					imgText = fmt.Sprintf("%s(%s)", GeminiImageSymbol, url)
 				}
 				content = append(content, imgText)
+			} else if strings.HasPrefix(part.InlineData.MimeType, "audio/") {
+				// Lyria 等音频模型：inlineData 为 base64 音频（如 audio/mpeg 的 MP3），
+				// 按 OpenAI 音频输出放到 delta.audio，歌词由后续文本 part 汇总进 content。
+				choice.Delta.Audio = types.MultimediaData{
+					Data: part.InlineData.Data,
+				}
 			}
-			//  else if strings.HasPrefix(part.InlineData.MimeType, "audio/") {
-			// 	choice.Message.Audio = types.MultimediaData{
-			// 		Data: part.InlineData.Data,
-			// 	}
-			// }
 		} else {
 			if part.ExecutableCode != nil {
 				content = append(content, "```"+part.ExecutableCode.Language+"\n"+part.ExecutableCode.Code+"\n```")
@@ -350,12 +351,13 @@ func (candidate *GeminiChatCandidate) ToOpenAIChoice(request *types.ChatCompleti
 					imgText = fmt.Sprintf("%s(%s)", GeminiImageSymbol, url)
 				}
 				content = append(content, imgText)
+			} else if strings.HasPrefix(part.InlineData.MimeType, "audio/") {
+				// Lyria 等音频模型：inlineData 为 base64 音频（如 audio/mpeg 的 MP3），
+				// 按 OpenAI 音频输出放到 message.audio，歌词由后续文本 part 汇总进 content。
+				choice.Message.Audio = types.MultimediaData{
+					Data: part.InlineData.Data,
+				}
 			}
-			//  else if strings.HasPrefix(part.InlineData.MimeType, "audio/") {
-			// 	choice.Message.Audio = types.MultimediaData{
-			// 		Data: part.InlineData.Data,
-			// 	}
-			// }
 		} else {
 			if part.ExecutableCode != nil {
 				content = append(content, "```"+part.ExecutableCode.Language+"\n"+part.ExecutableCode.Code+"\n```")
@@ -488,10 +490,11 @@ type GeminiError struct {
 }
 
 type GeminiErrorDetails struct {
-	Type     string                 `json:"@type,omitempty"`
-	Reason   string                 `json:"reason,omitempty"`
-	Domain   string                 `json:"domain,omitempty"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Type       string                 `json:"@type,omitempty"`
+	Reason     string                 `json:"reason,omitempty"`
+	Domain     string                 `json:"domain,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	RetryDelay string                 `json:"retryDelay,omitempty"`
 }
 
 func (e *GeminiError) Error() string {
@@ -509,12 +512,12 @@ func (e *GeminiErrorResponse) Error() string {
 }
 
 type GeminiChatResponse struct {
-	Candidates     []GeminiChatCandidate    `json:"candidates"`
-	PromptFeedback GeminiChatPromptFeedback `json:"promptFeedback"`
-	UsageMetadata  *GeminiUsageMetadata     `json:"usageMetadata,omitempty"`
-	ModelVersion   string                   `json:"modelVersion,omitempty"`
-	Model          string                   `json:"model,omitempty"`
-	ResponseId     string                   `json:"responseId,omitempty"`
+	Candidates     []GeminiChatCandidate     `json:"candidates"`
+	PromptFeedback *GeminiChatPromptFeedback `json:"promptFeedback,omitempty"`
+	UsageMetadata  *GeminiUsageMetadata      `json:"usageMetadata,omitempty"`
+	ModelVersion   string                    `json:"modelVersion,omitempty"`
+	Model          string                    `json:"model,omitempty"`
+	ResponseId     string                    `json:"responseId,omitempty"`
 
 	// Vertex AI countTokens 响应字段
 	TotalTokens             int                          `json:"totalTokens,omitempty"`
@@ -534,6 +537,8 @@ type GeminiUsageMetadata struct {
 
 	PromptTokensDetails     []GeminiUsageMetadataDetails `json:"promptTokensDetails,omitempty"`
 	CandidatesTokensDetails []GeminiUsageMetadataDetails `json:"candidatesTokensDetails,omitempty"`
+
+	TrafficType string `json:"trafficType,omitempty"`
 }
 
 type GeminiUsageMetadataDetails struct {
@@ -734,15 +739,19 @@ func OpenAIToGeminiChatContent(openaiContents []types.ChatCompletionMessage) ([]
 			for _, openaiPart := range openaiMessagePart {
 				// 处理 thinking 和 redacted_thinking 类型
 				if openaiPart.Type == "thinking" || openaiPart.Type == "redacted_thinking" {
+					// 仅当客户端给出"看起来像 round-trip 回来的 Gemini thoughtSignature"
+					// （>= minThoughtSignatureLength）才透传。
+					// 历史代码会在签名缺失/过短时填入 "skip_thought_signature_validator" 哨兵，
+					// 该哨兵只对 Antigravity 网关有效，官方 Gemini / Vertex 会以 400
+					// "Function call is missing a thought_signature" 拒绝请求；
+					// Antigravity 自有 providers/antigravity/chat.go 的 applyThinkingSignatureSentinel
+					// 路径在 OpenAI 转换之后再注入，无需在此兜底。
 					sig := openaiPart.ThinkingSignature
-					// 签名缺失或长度不足时注入哨兵值，让 Gemini 跳过签名校验；
-					// 合法的 Gemini 签名（round-trip 回来的）长度 >= 50，原样透传
-					if sig == "" || len(sig) < minThoughtSignatureLength {
-						sig = skipThoughtSignatureValidator
-					}
 					var sigField json.RawMessage
-					if sigBytes, err := json.Marshal(sig); err == nil {
-						sigField = sigBytes
+					if len(sig) >= minThoughtSignatureLength {
+						if sigBytes, err := json.Marshal(sig); err == nil {
+							sigField = sigBytes
+						}
 					}
 					content.Parts = append(content.Parts, GeminiPart{
 						Text:             openaiPart.Thinking,

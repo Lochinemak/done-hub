@@ -4,9 +4,11 @@ import { Icon } from '@iconify/react';
 import { InputAdornment, OutlinedInput, Stack, FormControl, InputLabel, Select, MenuItem } from '@mui/material'; //
 import { CHANNEL_OPTIONS } from 'constants/ChannelConstants';
 import { useTranslation } from 'react-i18next';
+import { formatGroupLabel } from './batchHelpers';
+import RatioBadge from 'ui-component/RatioBadge';
 // ----------------------------------------------------------------------
 
-export default function TableToolBar({ filterName, handleFilterName, groupOptions, tags, onSearch }) {
+export default function TableToolBar({ filterName, handleFilterName, groupOptions, groupMap, tags, onSearch }) {
   const theme = useTheme();
   const grey500 = theme.palette.grey[500];
   const { t } = useTranslation();
@@ -247,17 +249,22 @@ export default function TableToolBar({ filterName, handleFilterName, groupOption
             {groupOptions.map((option) => {
               return (
                 <MenuItem key={option} value={option}>
-                  {option}
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ width: '100%', minWidth: 0 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                      {formatGroupLabel(option, groupMap)}
+                    </span>
+                    <RatioBadge ratio={groupMap[option]?.ratio} />
+                  </Stack>
                 </MenuItem>
               );
             })}
           </Select>
         </FormControl>
         <FormControl>
-          <InputLabel htmlFor="channel-filter_tag-label">{t('channel_index.filterTags')}</InputLabel>
+          <InputLabel htmlFor="channel-filter_tag-label">{t('channel_index.tagFilter')}</InputLabel>
           <Select
             id="channel-filter_tag-label"
-            label={t('channel_index.filterTags')}
+            label={t('channel_index.tagFilter')}
             value={filterName.filter_tag}
             name="filter_tag"
             onChange={handleFilterName}
@@ -276,7 +283,7 @@ export default function TableToolBar({ filterName, handleFilterName, groupOption
               {t('channel_index.all')}
             </MenuItem>
             <MenuItem key={1} value={1}>
-              {t('channel_index.filterTags')}
+              {t('channel_index.noTagOnly')}
             </MenuItem>
             <MenuItem key={2} value={2}>
               {t('channel_index.onlyTags')}
@@ -323,6 +330,7 @@ TableToolBar.propTypes = {
   filterName: PropTypes.object,
   handleFilterName: PropTypes.func,
   groupOptions: PropTypes.array,
+  groupMap: PropTypes.object,
   tags: PropTypes.array,
   onSearch: PropTypes.func
 };

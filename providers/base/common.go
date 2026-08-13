@@ -4,6 +4,7 @@ import (
 	"context"
 	"done-hub/common"
 	"done-hub/common/config"
+	"done-hub/common/logger"
 	"done-hub/common/requester"
 	"done-hub/common/utils"
 	"done-hub/model"
@@ -11,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -121,6 +124,145 @@ func (p *BaseProvider) CommonRequestHeaders(headers map[string]string) {
 			}
 		}
 	}
+	// 请求头透传
+	p.applyHeaderOverride(headers)
+}
+
+// passthroughSkipHeaders 是通配(*)/正则透传时禁止转发的请求头：
+// hop-by-hop 头、底层连接控制头、以及不应按名匹配透传的凭证头
+var passthroughSkipHeaders = map[string]struct{}{
+	"connection":               {},
+	"keep-alive":               {},
+	"proxy-authenticate":       {},
+	"proxy-authorization":      {},
+	"te":                       {},
+	"trailer":                  {},
+	"transfer-encoding":        {},
+	"upgrade":                  {},
+	"cookie":                   {},
+	"host":                     {},
+	"content-length":           {},
+	"accept-encoding":          {},
+	"authorization":            {},
+	"x-api-key":                {},
+	"x-goog-api-key":           {},
+	"sec-websocket-key":        {},
+	"sec-websocket-version":    {},
+	"sec-websocket-extensions": {},
+}
+
+var headerPassthroughRegexCache sync.Map // map[string]*regexp.Regexp
+
+// applyHeaderOverride 处理渠道请求头透传配置 HeaderOverride（JSON 对象）：
+//   - 固定值：{"X-Foo":"bar"} 直接写入
+//   - {api_key} 占位符：替换为渠道密钥
+//   - {client_header:X-Name} 占位符：整段取客户端请求头 X-Name 的值
+//   - "*"：透传全部客户端请求头；"re:"/"regex:" 前缀：按正则透传匹配的客户端请求头
+//
+// 透传时会跳过 passthroughSkipHeaders 中的敏感头；显式规则在透传之后应用、优先级更高。
+// 注意：本方法在 provider 写入 Authorization 之前调用，与 ModelHeaders 一致，不用于覆盖鉴权头。
+func (p *BaseProvider) applyHeaderOverride(headers map[string]string) {
+	if p.Channel == nil || p.Channel.HeaderOverride == nil || *p.Channel.HeaderOverride == "" {
+		return
+	}
+	var override map[string]string
+	if err := json.Unmarshal([]byte(*p.Channel.HeaderOverride), &override); err != nil || len(override) == 0 {
+		return
+	}
+
+	// 第一步：解析透传规则并把命中的客户端请求头透传到上游
+	passAll := false
+	var passRegexps []*regexp.Regexp
+	for key := range override {
+		k := strings.ToLower(strings.TrimSpace(key))
+		switch {
+		case k == "*":
+			passAll = true
+		case strings.HasPrefix(k, "re:"):
+			if re := getPassthroughRegex(strings.TrimSpace(key[len("re:"):])); re != nil {
+				passRegexps = append(passRegexps, re)
+			}
+		case strings.HasPrefix(k, "regex:"):
+			if re := getPassthroughRegex(strings.TrimSpace(key[len("regex:"):])); re != nil {
+				passRegexps = append(passRegexps, re)
+			}
+		}
+	}
+
+	if (passAll || len(passRegexps) > 0) && p.Context != nil {
+		for name := range p.Context.Request.Header {
+			if _, skip := passthroughSkipHeaders[strings.ToLower(name)]; skip {
+				continue
+			}
+			if !passAll && !matchAnyRegex(passRegexps, name) {
+				continue
+			}
+			if value := strings.TrimSpace(p.Context.Request.Header.Get(name)); value != "" {
+				headers[name] = value
+			}
+		}
+	}
+
+	// 第二步：应用显式规则（固定值/占位符），覆盖透传结果
+	for key, tmpl := range override {
+		if isPassthroughRuleKey(key) {
+			continue
+		}
+		if value, ok := p.resolveHeaderTemplate(tmpl); ok {
+			headers[key] = value
+		}
+	}
+}
+
+// resolveHeaderTemplate 解析请求头模板值，返回 (值, 是否设置)
+func (p *BaseProvider) resolveHeaderTemplate(tmpl string) (string, bool) {
+	if name, ok := strings.CutPrefix(strings.TrimSpace(tmpl), "{client_header:"); ok {
+		name, ok = strings.CutSuffix(name, "}")
+		name = strings.TrimSpace(name)
+		if !ok || name == "" || p.Context == nil {
+			return "", false
+		}
+		// 安全边界：不在客户端提供的内容里再插值 {api_key}
+		value := strings.TrimSpace(p.Context.Request.Header.Get(name))
+		return value, value != ""
+	}
+
+	if strings.Contains(tmpl, "{api_key}") {
+		tmpl = strings.ReplaceAll(tmpl, "{api_key}", p.Channel.Key)
+	}
+	return tmpl, strings.TrimSpace(tmpl) != ""
+}
+
+func isPassthroughRuleKey(key string) bool {
+	k := strings.ToLower(strings.TrimSpace(key))
+	return k == "*" || strings.HasPrefix(k, "re:") || strings.HasPrefix(k, "regex:")
+}
+
+func matchAnyRegex(regexps []*regexp.Regexp, name string) bool {
+	for _, re := range regexps {
+		if re.MatchString(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// getPassthroughRegex 编译并缓存正则，编译失败时缓存空结果避免重复编译
+// HTTP 请求头名大小写不敏感，匹配统一加 (?i)，避免用户写 ^x- 这类小写规则静默匹配不到
+func getPassthroughRegex(pattern string) *regexp.Regexp {
+	if pattern == "" {
+		return nil
+	}
+	if v, ok := headerPassthroughRegexCache.Load(pattern); ok {
+		re, _ := v.(*regexp.Regexp)
+		return re
+	}
+	re, err := regexp.Compile("(?i)" + pattern)
+	if err != nil {
+		re = nil
+	}
+	headerPassthroughRegexCache.Store(pattern, re)
+	return re
 }
 
 func (p *BaseProvider) GetUsage() *types.Usage {
@@ -137,6 +279,24 @@ func (p *BaseProvider) SetContext(c *gin.Context) {
 	// 这样即使客户端断开，上游请求也会继续完成，确保计费和日志正常记录
 	if c != nil && p.Requester != nil {
 		p.Requester.Context = context.WithoutCancel(c.Request.Context())
+		// 统一采集上游 request-id：所有经 Requester 收发的 provider 自动覆盖，
+		// 失败响应也在错误判定前采集（排障最需要）。
+		// 不走 Requester 的 SDK 直连路径（bedrock aws_client）自行采集，汇入同一 key。
+		//
+		// 作用域：挂在 SetContext 上，而 providers.GetProvider 是唯一的 provider 构造入口，
+		// 因此渠道测试、模型列表拉取等非 relay 路径也会采集并写入各自的 gin context。
+		// 无害（那些路径不落库、不回写响应头），但别误以为只覆盖 relay 请求。
+		//
+		// 同一尝试内多次请求时后者覆盖前者，是有意如此：geminicli 这类先 count_tokens
+		// 再 generate 的 provider 会落最后一次调用的 id，主调用通常在最后，取它更有排障价值。
+		//
+		// 前提：hook 挂在 Requester 实例上。provider 若在 SetContext 之后换掉 Requester
+		// （如 deepseek 的 claudeProvider 委托），必须重新 SetContext，否则该路径静默丢采集。
+		p.Requester.ResponseHook = func(resp *http.Response) {
+			if requestID := requester.ExtractUpstreamRequestID(resp.Header); requestID != "" {
+				c.Set(config.GinUpstreamRequestIdKey, requestID)
+			}
+		}
 	}
 }
 
@@ -158,26 +318,113 @@ func (p *BaseProvider) GetResponseModelName(requestModel string) string {
 	return GetResponseModelNameFromContext(p.Context, requestModel)
 }
 
+// resolveUnifiedModel 返回应当替换成的原始请求模型名。
+// ok=false 表示无需替换（开关关闭 / 无 original_model / 与上游名一致）。
+// 仅在确实发生替换时记录一条日志，并用 context 标志位保证每个请求只记一次
+// （流式场景下替换函数会被每个 chunk 调用）。
+func resolveUnifiedModel(ctx *gin.Context, upstreamModel string) (originalModel string, ok bool) {
+	if ctx == nil || !config.UnifiedRequestResponseModelEnabled {
+		return "", false
+	}
+
+	val, exists := ctx.Get("original_model")
+	if !exists {
+		return "", false
+	}
+	originalModelStr, isStr := val.(string)
+	if !isStr || originalModelStr == "" || originalModelStr == upstreamModel {
+		return "", false
+	}
+
+	if !ctx.GetBool("unified_model_logged") {
+		ctx.Set("unified_model_logged", true)
+		logger.LogInfo(ctx.Request.Context(), fmt.Sprintf(
+			"unified_response_model: 响应模型名由上游的 %s 替换为请求的 %s", upstreamModel, originalModelStr))
+	}
+	return originalModelStr, true
+}
+
 // GetResponseModelNameFromContext 从 Context 获取响应模型名称的静态函数
 // 用于流式响应等无法访问 BaseProvider 的场景
 func GetResponseModelNameFromContext(ctx *gin.Context, fallbackModel string) string {
-	if ctx == nil {
-		return fallbackModel
+	if originalModel, ok := resolveUnifiedModel(ctx, fallbackModel); ok {
+		return originalModel
+	}
+	return fallbackModel
+}
+
+// UnifyModelInJSONBytes 在原始 JSON 字节上，仅把 modelPath 指向的字段替换为用户原始请求模型名。
+// 用于 claude/gemini/responses 等原生格式的流式响应：上游 SSE chunk 需尽量字节级透传，
+// 不能反序列化整个对象再 Marshal（会改变字段顺序、丢弃未知字段）。这里用 gjson 读 + sjson 改，
+// 只动 model 一个字段，其余字节（含字段顺序）原样保留。
+// modelPath 为 gjson/sjson 路径，如 claude 流式的 "message.model"、responses 的 "response.model"、
+// gemini 的 "modelVersion"。字段不存在或无需替换时返回原始字节、changed=false。
+func UnifyModelInJSONBytes(ctx *gin.Context, raw []byte, modelPath string) (out []byte, changed bool) {
+	if ctx == nil || !config.UnifiedRequestResponseModelEnabled {
+		return raw, false
 	}
 
-	// 检查是否启用了统一请求响应模型功能
-	if !config.UnifiedRequestResponseModelEnabled {
-		return fallbackModel
+	cur := gjson.GetBytes(raw, modelPath)
+	if !cur.Exists() {
+		return raw, false
 	}
 
-	// 优先使用存储的原始模型名称
-	if originalModel, exists := ctx.Get("original_model"); exists {
-		if originalModelStr, ok := originalModel.(string); ok && originalModelStr != "" {
-			return originalModelStr
+	originalModel, ok := resolveUnifiedModel(ctx, cur.String())
+	if !ok {
+		return raw, false
+	}
+
+	patched, err := sjson.SetBytes(raw, modelPath, originalModel)
+	if err != nil {
+		return raw, false
+	}
+	return patched, true
+}
+
+// IsResponsesTerminalEvent 判断是否为 responses 流的终止事件（携带最终 usage）。
+// 不同上游可能以 response.completed / response.done / response.incomplete / response.failed 任一作为终止帧，
+// openai 与 codex 两条解析链路统一以此为准，避免各自漏认某种类型导致 usage 丢失。
+func IsResponsesTerminalEvent(eventType string) bool {
+	switch eventType {
+	case "response.completed", "response.done", "response.incomplete", "response.failed":
+		return true
+	default:
+		return false
+	}
+}
+
+// ExtractResponsesStreamUsage 从 responses 终止事件的嵌套 response.usage 提取 usage 写入 dst，
+// 返回 true 表示成功提取到上游 usage。仅覆盖 token 数；extra billing（web_search 等）由各 handler 自行补充。
+// 仅在确实拿到 usage 时才覆盖 dst：usage 缺失时返回 false 且不动 dst，保住已累积的 TextBuilder，
+// 让 relay 层基于输出文本的兜底估算仍能生效。
+func ExtractResponsesStreamUsage(event *types.OpenAIResponsesStreamResponses, dst *types.Usage) bool {
+	if event == nil || !IsResponsesTerminalEvent(event.Type) {
+		return false
+	}
+	if event.Response == nil || event.Response.Usage == nil {
+		return false
+	}
+	*dst = *event.Response.Usage.ToOpenAIUsage()
+	return true
+}
+
+// AccumulateResponsesStreamText 累积 responses 流中属于计费 output token 的增量事件到 dst.TextBuilder，
+// 用于终止事件未带 usage 时的 completion 兜底估算。覆盖三类事件：正文文本、推理文本（summary 与原始
+// reasoning）、函数调用参数——三者均计入 output token。openai 与 codex 两条解析链路共用，避免新增 delta
+// 事件时各处重复维护、漏改（新事件只需在此登记一次）。
+func AccumulateResponsesStreamText(event *types.OpenAIResponsesStreamResponses, dst *types.Usage) {
+	if event == nil || dst == nil {
+		return
+	}
+	switch event.Type {
+	case "response.output_text.delta",
+		"response.reasoning_summary_text.delta",
+		"response.reasoning_text.delta",
+		"response.function_call_arguments.delta":
+		if delta, ok := event.Delta.(string); ok {
+			dst.TextBuilder.WriteString(delta)
 		}
 	}
-
-	return fallbackModel
 }
 
 func (p *BaseProvider) GetChannel() *model.Channel {
@@ -472,6 +719,23 @@ func (p *BaseProvider) GetRawBody() ([]byte, bool) {
 		}
 	}
 	return nil, false
+}
+
+// ReadNativeRawBody 读取并缓存客户端原始请求字节，作为原生路径字节级透传的基础。
+// mustHave 非空时要求 body 含该顶层字段（用于排除走错入口的转换请求）。
+// context 缺失 / 读取失败 / body 为空 / 缺 mustHave 字段时返回 (nil,false)，调用方应回退结构体序列化。
+func (p *BaseProvider) ReadNativeRawBody(mustHave string) ([]byte, bool) {
+	if p.Context == nil {
+		return nil, false
+	}
+	rawBody, err := common.ReadBodyRaw(p.Context)
+	if err != nil || len(rawBody) == 0 {
+		return nil, false
+	}
+	if mustHave != "" && !gjson.GetBytes(rawBody, mustHave).Exists() {
+		return nil, false
+	}
+	return rawBody, true
 }
 
 // ClearRawBody 清理缓存的请求体以释放内存

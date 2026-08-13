@@ -44,6 +44,9 @@ func (u *Usage) GetExtraTokens() map[string]int {
 	// Anthropic-style top-level cache fields (from OpenAI-compatible gateways
 	// proxying Anthropic models). Only used as fallback when the standard
 	// prompt_tokens_details fields are not already populated.
+	// 顶层扁平字段不携带 5m/1h TTL 占比，全部计入 CachedWriteTokens 按 5m 倍率计费——
+	// 偏保守（少算 1h 部分的 0.75x）。
+	// 原生 Anthropic 路径在 providers/claude/common.go 按嵌套字段拆 1h 桶。
 	if u.CacheCreationInputTokens > 0 && u.PromptTokensDetails.CachedWriteTokens == 0 {
 		u.PromptTokensDetails.CachedWriteTokens = u.CacheCreationInputTokens
 	}
@@ -61,14 +64,24 @@ func (u *Usage) GetExtraTokens() map[string]int {
 		u.ExtraTokens[config.UsageExtraInputTextTokens] = u.PromptTokensDetails.TextTokens
 	}
 
-	// 缓存写入
+	// 缓存写入（5m）
 	if u.PromptTokensDetails.CachedWriteTokens > 0 && u.ExtraTokens[config.UsageExtraCachedWrite] == 0 {
 		u.ExtraTokens[config.UsageExtraCachedWrite] = u.PromptTokensDetails.CachedWriteTokens
+	}
+
+	// 缓存写入（1h）
+	if u.PromptTokensDetails.CachedWrite1hTokens > 0 && u.ExtraTokens[config.UsageExtraCachedWrite1h] == 0 {
+		u.ExtraTokens[config.UsageExtraCachedWrite1h] = u.PromptTokensDetails.CachedWrite1hTokens
 	}
 
 	// 缓存读取
 	if u.PromptTokensDetails.CachedReadTokens > 0 && u.ExtraTokens[config.UsageExtraCachedRead] == 0 {
 		u.ExtraTokens[config.UsageExtraCachedRead] = u.PromptTokensDetails.CachedReadTokens
+	}
+
+	// OpenAI 缓存写入（GPT-5.6+，prompt_tokens_details.cache_write_tokens）
+	if u.PromptTokensDetails.OpenAICacheWriteTokens > 0 && u.ExtraTokens[config.UsageExtraOpenAICacheWrite] == 0 {
+		u.ExtraTokens[config.UsageExtraOpenAICacheWrite] = u.PromptTokensDetails.OpenAICacheWriteTokens
 	}
 
 	// 输入图像
@@ -114,8 +127,14 @@ type PromptTokensDetails struct {
 	ImageTokens          int `json:"image_tokens,omitempty"`
 	CachedTokensInternal int `json:"cached_tokens_internal,omitempty"`
 
-	CachedWriteTokens int `json:"-"`
-	CachedReadTokens  int `json:"-"`
+	CachedWriteTokens   int `json:"-"`
+	CachedWrite1hTokens int `json:"-"`
+	CachedReadTokens    int `json:"-"`
+
+	// OpenAICacheWriteTokens 对应 OpenAI GPT-5.6+ 的 prompt_tokens_details.cache_write_tokens
+	// （Responses API 为 input_token_details.cache_write_tokens）。与 Anthropic 的 CachedWriteTokens
+	// 语义解耦：OpenAI 缓存写入单一 TTL、按 1.25x 计费，走 UsageExtraOpenAICacheWrite。
+	OpenAICacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 type CompletionTokensDetails struct {
@@ -154,7 +173,12 @@ type OpenAIError struct {
 	InnerError any    `json:"innererror,omitempty"`
 
 	// RateLimitResetAt 限流重置时间（Unix 时间戳，秒）
-	// 用于存储从响应头中解析的冻结时间（如 anthropic-ratelimit-unified-reset）
+	// 用于存储从响应头/响应体中解析的冻结时间（如 anthropic-ratelimit-unified-reset、Gemini retryDelay）。
+	//
+	// 约定：provider **仅在拿到上游精确的 Retry-After 信号时**才应设置此字段，不要凭状态码或
+	// 经验值伪造。relay/main.go:shouldCooldowns 把它作为"上游已明确告诉何时再来"的信号，
+	// 优先级高于管理员配置的 RetryCooldownPerStatus 和全局 RetryCooldownSeconds。
+	// 任何状态码都会读取该字段——若 provider 误填，会导致非 429 路径也基于错的时间冷却。
 	RateLimitResetAt int64 `json:"-"`
 }
 

@@ -19,40 +19,47 @@ import (
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id                int            `json:"id"`
-	Username          string         `json:"username" gorm:"unique;index" validate:"required,max=12"`
-	Password          string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	DisplayName       string         `json:"display_name" gorm:"index" validate:"max=20"`
-	Role              int            `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status            int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email             string         `json:"email" gorm:"index" validate:"max=50"`
-	AvatarUrl         string         `json:"avatar_url" gorm:"type:varchar(500);column:avatar_url;default:''"`
-	OidcId            string         `json:"oidc_id" gorm:"column:oidc_id;index"`
-	GitHubId          string         `json:"github_id" gorm:"column:github_id;index"`
-	GitHubIdNew       int            `json:"github_id_new" gorm:"column:github_id_new;index"`
-	WeChatId          string         `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId        int64          `json:"telegram_id" gorm:"type:bigint;column:telegram_id;default:0;"`
-	LarkId            string         `json:"lark_id" gorm:"column:lark_id;index"`
-	LinuxDoId         int            `json:"linuxdo_id" gorm:"type:bigint;column:linuxdo_id;index;default:0;"`
-	LinuxDoUsername   string         `json:"linuxdo_username" gorm:"column:linuxdo_username;index;default:'';"`
-	LinuxDoTrustLevel int            `json:"linuxdo_trust_level" gorm:"type:int;column:linuxdo_trust_level;default:0;"`
-	VerificationCode  string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	InviteCode        string         `json:"invite_code" gorm:"-:all"`                                          // this field is only for registration, don't save it to database!
-	UsedInviteCode    string         `json:"used_invite_code" gorm:"type:varchar(32);index;default:''"`         // the invite code used during registration, for statistics
-	AccessToken       string         `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota             int            `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota         int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount      int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group             string         `json:"group" gorm:"type:varchar(32);default:'default'"`
-	AffCode           string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount          int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota          int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`
-	AffHistoryQuota   int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"`
-	InviterId         int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	LastLoginTime     int64          `json:"last_login_time" gorm:"bigint;default:0"`
-	LastLoginIp       string         `json:"last_login_ip" gorm:"type:varchar(128);default:''"`
-	CreatedTime       int64          `json:"created_time" gorm:"bigint"`
-	DeletedAt         gorm.DeletedAt `json:"-" gorm:"index"`
+	Id                         int            `json:"id"`
+	Username                   string         `json:"username" gorm:"unique;index" validate:"required,max=12"`
+	Password                   string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	DisplayName                string         `json:"display_name" gorm:"index" validate:"max=20"`
+	Role                       int            `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status                     int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email                      string         `json:"email" gorm:"index" validate:"max=50"`
+	AvatarUrl                  string         `json:"avatar_url" gorm:"type:varchar(500);column:avatar_url;default:''"`
+	OidcId                     string         `json:"oidc_id" gorm:"column:oidc_id;index"`
+	GitHubId                   string         `json:"github_id" gorm:"column:github_id;index"`
+	GitHubIdNew                int            `json:"github_id_new" gorm:"column:github_id_new;index"`
+	WeChatId                   string         `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId                 int64          `json:"telegram_id" gorm:"type:bigint;column:telegram_id;default:0;"`
+	LarkId                     string         `json:"lark_id" gorm:"column:lark_id;index"`
+	LinuxDoId                  int            `json:"linuxdo_id" gorm:"type:bigint;column:linuxdo_id;index;default:0;"`
+	LinuxDoUsername            string         `json:"linuxdo_username" gorm:"column:linuxdo_username;index;default:'';"`
+	LinuxDoTrustLevel          int            `json:"linuxdo_trust_level" gorm:"type:int;column:linuxdo_trust_level;default:0;"`
+	VerificationCode           string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
+	InviteCode                 string         `json:"invite_code" gorm:"-:all"`                                          // this field is only for registration, don't save it to database!
+	Agreed                     bool           `json:"agreed" gorm:"-:all"`                                               // this field is only for registration legal consent, don't save it to database!
+	AgreedUserAgreementVersion string         `json:"agreed_user_agreement_version" gorm:"type:varchar(32);default:''"`  // 用户已同意的用户协议版本（正文哈希），空为未同意
+	AgreedPrivacyPolicyVersion string         `json:"agreed_privacy_policy_version" gorm:"type:varchar(32);default:''"`  // 用户已同意的隐私政策版本（正文哈希），空为未同意
+	NeedAgreeUserAgreement     bool           `json:"need_agree_user_agreement" gorm:"-:all"`                            // 运行期计算：该用户是否需要（重新）同意用户协议，不入库
+	NeedAgreePrivacyPolicy     bool           `json:"need_agree_privacy_policy" gorm:"-:all"`                            // 运行期计算：该用户是否需要（重新）同意隐私政策，不入库
+	UsedInviteCode             string         `json:"used_invite_code" gorm:"type:varchar(32);index;default:''"`         // the invite code used during registration, for statistics
+	AccessToken                string         `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	Quota                      int            `json:"quota" gorm:"type:bigint;default:0"`
+	UsedQuota                  int            `json:"used_quota" gorm:"type:bigint;default:0;column:used_quota"` // used quota
+	QuotaRemindThreshold       *int           `json:"quota_remind_threshold" gorm:"type:bigint;default:null"`    // 每用户额度提醒阈值；nil 回退全局 config.QuotaRemindThreshold，非 nil 按字面值生效（含 0，表示仅额度用尽时提醒）
+	QuotaRemindEnabled         *bool          `json:"quota_remind_enabled" gorm:"default:null"`                  // 每用户额度提醒开关；nil 视为开启，false 时该用户不接收额度提醒
+	RequestCount               int            `json:"request_count" gorm:"type:int;default:0;"`                  // request number
+	Group                      string         `json:"group" gorm:"type:varchar(32);default:'default'"`
+	AffCode                    string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount                   int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffQuota                   int            `json:"aff_quota" gorm:"type:bigint;default:0;column:aff_quota"`
+	AffHistoryQuota            int            `json:"aff_history_quota" gorm:"type:bigint;default:0;column:aff_history"`
+	InviterId                  int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	LastLoginTime              int64          `json:"last_login_time" gorm:"bigint;default:0"`
+	LastLoginIp                string         `json:"last_login_ip" gorm:"type:varchar(128);default:''"`
+	CreatedTime                int64          `json:"created_time" gorm:"bigint"`
+	DeletedAt                  gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
 type UserUpdates func(*User)
@@ -71,6 +78,9 @@ var allowedUserOrderFields = map[string]bool{
 	"created_time":    true,
 	"last_login_time": true,
 	"last_login_ip":   true,
+	"quota":           true,
+	"used_quota":      true,
+	"request_count":   true,
 }
 
 func GetUsersList(params *GenericParams) (*DataResult[User], error) {
@@ -255,15 +265,18 @@ func UpdateUser(id int, fields map[string]interface{}) error {
 		return err
 	}
 
-	// 如果更新了分组字段，清理缓存
-	if _, hasGroup := fields["group"]; hasGroup {
+	// 如果更新了分组、角色或状态字段，清理鉴权相关缓存
+	_, hasGroup := fields["group"]
+	_, hasRole := fields["role"]
+	_, hasStatus := fields["status"]
+	if hasGroup || hasRole || hasStatus {
 		ClearUserGroupAndTokensCache(id)
 	}
 
 	return nil
 }
 
-// ClearUserGroupAndTokensCache 清理用户分组和所有Token的缓存
+// ClearUserGroupAndTokensCache 清理用户鉴权相关缓存（分组 / 角色状态 / 启用状态 / 所有Token）
 func ClearUserGroupAndTokensCache(userId int) {
 	if !config.RedisEnabled {
 		return
@@ -276,6 +289,24 @@ func ClearUserGroupAndTokensCache(userId int) {
 	}
 	if err := cache.DeleteCache(userGroupKey); err != nil {
 		logger.SysError(fmt.Sprintf("清理用户分组缓存失败 userId=%d: %v", userId, err))
+	}
+
+	// 清理用户角色/状态缓存，保证降级、封禁等变更下一次鉴权即生效
+	userRoleStatusKey := fmt.Sprintf(UserRoleStatusCacheKey, userId)
+	if err := redis.RedisDel(userRoleStatusKey); err != nil {
+		logger.SysError(fmt.Sprintf("清理用户role/status Redis缓存失败 userId=%d: %v", userId, err))
+	}
+	if err := cache.DeleteCache(userRoleStatusKey); err != nil {
+		logger.SysError(fmt.Sprintf("清理用户role/status缓存失败 userId=%d: %v", userId, err))
+	}
+
+	// 清理用户启用状态缓存，保证封禁/删除后 relay(令牌)路径下一次请求即被拦截
+	userEnabledKey := fmt.Sprintf(UserEnabledCacheKey, userId)
+	if err := redis.RedisDel(userEnabledKey); err != nil {
+		logger.SysError(fmt.Sprintf("清理用户enabled Redis缓存失败 userId=%d: %v", userId, err))
+	}
+	if err := cache.DeleteCache(userEnabledKey); err != nil {
+		logger.SysError(fmt.Sprintf("清理用户enabled缓存失败 userId=%d: %v", userId, err))
 	}
 
 	// 获取用户所有Token的Key
@@ -313,7 +344,14 @@ func (user *User) Delete() error {
 	}
 
 	err = DB.Delete(user).Error
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 软删除提交后再清一次缓存：防止并发请求在 Update 清理与 DB.Delete 之间用旧数据回填，
+	// 留下永不过期的脏缓存导致已删除用户仍能通过鉴权。
+	ClearUserGroupAndTokensCache(user.Id)
+	return nil
 }
 
 // ValidateAndFill check password & user status
@@ -519,6 +557,33 @@ func IsAdmin(userId int) bool {
 	return user.Role >= config.RoleAdminUser
 }
 
+// GetUserRoleAndStatus 实时读取用户当前的角色与状态（仅查询 role、status 两列）。
+// 用户不存在（含已删除）时返回 error，供鉴权侧拒绝。
+func GetUserRoleAndStatus(userId int) (role int, status int, err error) {
+	if userId == 0 {
+		return 0, 0, errors.New("id 为空！")
+	}
+	var user User
+	err = DB.Where("id = ?", userId).Select("role", "status").First(&user).Error
+	if err != nil {
+		return 0, 0, err
+	}
+	return user.Role, user.Status, nil
+}
+
+func IsReliable(userId int) bool {
+	if userId == 0 {
+		return false
+	}
+	var user User
+	err := DB.Where("id = ?", userId).Select("role").Find(&user).Error
+	if err != nil {
+		logger.SysError("no such user " + err.Error())
+		return false
+	}
+	return user.Role >= config.RoleReliableUser
+}
+
 func IsUserEnabled(userId int) (bool, error) {
 	if userId == 0 {
 		return false, errors.New("user id is empty")
@@ -552,6 +617,24 @@ func GetUserFields(id int, fields []string) (map[string]interface{}, error) {
 func GetUserQuota(id int) (quota int, err error) {
 	err = DB.Model(&User{}).Where("id = ?", id).Select("quota").Find(&quota).Error
 	return quota, err
+}
+
+// GetUserQuotaWithRemindSetting 一次查询取回用户余额与额度提醒设置，供扣费热路径复用同一次单行查询（避免对 users 表重复 SELECT）。
+// threshold：nil 表示未设置（回退全局默认），非 nil 时按字面值生效（含 0）。
+// enabled：仅在用户显式关闭（列为 false）时返回 false，NULL 视为开启，保持原有行为。
+func GetUserQuotaWithRemindSetting(id int) (quota int, threshold *int, enabled bool, err error) {
+	var row struct {
+		Quota                int
+		QuotaRemindThreshold *int
+		QuotaRemindEnabled   *bool
+	}
+	err = DB.Model(&User{}).Where("id = ?", id).
+		Select("quota", "quota_remind_threshold", "quota_remind_enabled").Find(&row).Error
+	if err != nil {
+		return 0, nil, true, err
+	}
+	enabled = row.QuotaRemindEnabled == nil || *row.QuotaRemindEnabled
+	return row.Quota, row.QuotaRemindThreshold, enabled, nil
 }
 
 func GetUserUsedQuota(id int) (quota int, err error) {
@@ -687,14 +770,30 @@ func GetUserInviteCount(userId int) (int64, error) {
 }
 
 type StatisticsUser struct {
-	TotalQuota       int64 `json:"total_quota"`
-	TotalUsedQuota   int64 `json:"total_used_quota"`
-	TotalUser        int64 `json:"total_user"`
-	TotalInviterUser int64 `json:"total_inviter_user"`
+	TotalQuota        int64 `json:"total_quota"`
+	TotalUsedQuota    int64 `json:"total_used_quota"`
+	TotalUser         int64 `json:"total_user"`
+	TotalInviterUser  int64 `json:"total_inviter_user"`
+	TotalRequestCount int64 `json:"total_request_count"`
+	TotalTokens       int64 `json:"total_tokens"`
 }
 
 func GetStatisticsUser() (statisticsUser *StatisticsUser, err error) {
 	err = DB.Model(&User{}).Select("sum(quota) as total_quota, sum(used_quota) as total_used_quota, count(*) as total_user, count(CASE WHEN inviter_id != 0 THEN 1 END) as total_inviter_user").Scan(&statisticsUser).Error
+	if err != nil {
+		return statisticsUser, err
+	}
+
+	// 全站请求总次数与总 token 数，从 statistics 表聚合（比扫 logs 高效）
+	var logStat struct {
+		TotalRequestCount int64 `gorm:"column:total_request_count"`
+		TotalTokens       int64 `gorm:"column:total_tokens"`
+	}
+	if e := DB.Model(&Statistics{}).Select("COALESCE(sum(request_count),0) as total_request_count, COALESCE(sum(prompt_tokens + completion_tokens),0) as total_tokens").Scan(&logStat).Error; e == nil {
+		statisticsUser.TotalRequestCount = logStat.TotalRequestCount
+		statisticsUser.TotalTokens = logStat.TotalTokens
+	}
+
 	return statisticsUser, err
 }
 
@@ -766,7 +865,7 @@ func ProcessInviterReward(userId int, rechargeQuota int, ip string) error {
 
 	if config.InviterRewardType == "percentage" {
 		// 百分比奖励
-		rewardQuota = int(float64(rechargeQuota) * float64(config.InviterRewardValue) / 100.0)
+		rewardQuota = common.QuotaFromFloat(float64(rechargeQuota) * float64(config.InviterRewardValue) / 100.0)
 		logMessage = fmt.Sprintf("邀请用户充值返利 %s \n\n (充值额度: %s, 返利比例: %d%%)",
 			common.LogQuota(rewardQuota),
 			common.LogQuota(rechargeQuota),

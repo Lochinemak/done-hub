@@ -24,6 +24,7 @@
     "checkUpdates": "Check Updates",
     "dataFormatIncorrect": "Data format is incorrect",
     "fetchData": "Fetch Data",
+    "fetchFromModelsDev": "Fetch from models.dev",
     "inputMultiplierChanged": "Input multiplier changed from",
     "newModels": "New Models",
     "noNewModels": "No new models",
@@ -47,6 +48,12 @@
     "extraRatiosChanges": "Changes in magnification ratio",
     "extraRatiosChangesTip": "Changes in magnification: {{changes}}",
     "extraRatiosRemoved": "Remove magnification ratio",
+    "longContextAdded": "Add long context tier",
+    "longContextRemoved": "Remove long context tier",
+    "longContextChanged": "Long context tier changed",
+    "longContextThreshold": "Threshold",
+    "longContextInput": "Input ratio",
+    "longContextOutput": "Output ratio",
     "modified": "Edit",
     "removed": "Delete"
   },
@@ -60,7 +67,9 @@
     "console": "Console",
     "error": "Error",
     "unknownVersion": "Unknown Version",
-    "welcomeBack": "Welcome Back"
+    "welcomeBack": "Welcome Back",
+    "userAgreement": "User Agreement",
+    "privacyPolicy": "Privacy Policy"
   },
   "sidebar": {
     "totalQuota": "Total Quota",
@@ -73,6 +82,16 @@
     "loadingError": "Failed to load about content...",
     "projectRepo": "Project repository:"
   },
+  "userAgreement": {
+    "title": "User Agreement",
+    "emptyDescription": "The administrator has not configured the user agreement content yet.",
+    "loadingError": "Failed to load user agreement content..."
+  },
+  "privacyPolicy": {
+    "title": "Privacy Policy",
+    "emptyDescription": "The administrator has not configured the privacy policy content yet.",
+    "loadingError": "Failed to load privacy policy content..."
+  },
   "alloy 映射": "alloy mapping",
   "analytics": "Analytics",
   "analytics_index": {
@@ -80,6 +99,8 @@
     "averageLatency": "Average Latency",
     "channelCount": "Channel Count",
     "consumptionStatistics": "Consumption Statistics",
+    "costStatistics": "Cost Statistics",
+    "profitStatistics": "Profit Statistics",
     "directRegistration": "Direct Registration",
     "disabled": "Disabled",
     "endTime": "End Time",
@@ -92,6 +113,9 @@
     "testDisabled": "Test Disabled",
     "tokensStatistics": "Tokens Statistics",
     "totalUserBalance": "Total User Balance",
+    "totalUsedQuota": "Total Used",
+    "totalRequestCount": "Requests",
+    "totalTokens": "Total Tokens",
     "totalUserSpending": "Total User Spending",
     "totalUsers": "Total Users",
     "unused": "Unused",
@@ -101,7 +125,10 @@
     "order": "Order",
     "realTimeTraffic": "Real-time Traffic",
     "tpmDescription": "TPM (Token/min)",
+    "cpmDescription": "CPM",
+    "ppmDescription": "PPM",
     "last60SecondsStats": "Last 60 seconds statistics",
+    "autoRefresh": "Auto",
     "timeFilter": {
       "all": "All",
       "year": "This Year",
@@ -130,7 +157,19 @@
     "collapse": "Collapse",
     "customModelTip": "Customize: Click or press Enter to enter",
     "editSuccess": "update completed!",
+    "tagGroupOverwriteWarning": "This tag has {{count}} channels in total. Saving will overwrite all {{count}} channels with the same configuration (except each channel's own Key).",
+    "tagGroupSaveConfirmTitle": "Confirm overwriting group configuration",
+    "tagGroupSaveConfirmContent": "Saving will overwrite all {{count}} channels under tag \"{{tag}}\" with the current configuration (except each channel's own Key). Continue?",
+    "tagBulkFieldConfirmTitle": "Confirm bulk change",
+    "tagBulkFieldConfirmContent": "This will set \"{{field}}\" to {{value}} for all {{count}} channels under tag \"{{tag}}\". Continue?",
+    "tagMemberSectionTitle": "Group members (each Key is one channel)",
+    "tagMemberKeysLabel": "Member Key list",
+    "tagMemberKeysHelper": "One Key per line, each mapping to a channel in this group. Adding a line creates a channel; removing one deletes that channel. Each channel's Key is never overwritten by the shared config.",
+    "joinExistingTagWarning": "Tag \"{{tag}}\" already exists ({{count}} channels). After saving, this channel will join that group, and future group-wide edits will overwrite its configuration.",
     "expand": "Expand",
+    "sectionBasic": "Basic",
+    "sectionAdvanced": "Advanced",
+    "sectionBilling": "Billing & Behavior",
     "inputAllModel": "Fill in all models",
     "inputChannelModel": "Fill in the channel support model",
     "invalidJson": "Invalid JSON",
@@ -176,7 +215,25 @@
     "overwriteMappings": "Overwrite existing mappings",
     "overwriteMappingsTip": "When enabled, existing mappings will be cleared and only new mappings will be preserved",
     "clearModels": "Reset",
-    "clearModelsTip": "Reset all selected models"
+    "clearModelsTip": "Reset all selected models",
+    "clearSearch": "Clear",
+    "tagMembersTitle": "{{count}} member channels in this group",
+    "tagMembersHint": "Each member's Key is independent and unaffected by the shared config. To add or remove members, expand this tag's row in the list.",
+    "baseUrl": "API URL",
+    "existingModels": "Selected Models",
+    "fetchModels": "Fetch Models",
+    "invertSelection": "Invert Selection",
+    "invertSelectionTooltip": "Invert the current selection",
+    "modelSelector": "Model Selector",
+    "noMatchingModels": "No matching models",
+    "noModels": "No models",
+    "openaiBaseUrlTip": "Enter an OpenAI-format API URL, e.g., https://api.openai.com",
+    "openaiMode": "Switch to OpenAI format to fetch models",
+    "otherModels": "Other Models",
+    "searchModels": "Search Models",
+    "selectAll": "Select All",
+    "selectAllTooltip": "Select all models",
+    "selectedCount": "{{count}} models selected"
   },
   "channel_index": {
     "AzureApiVersion": "Azure version number",
@@ -228,7 +285,10 @@
     "updateEnabledBalance": "Update Enabled Balance",
     "usedBalance": "Used Balance/Remaining Balance",
     "weight": "Weight",
+    "costRatio": "Cost Ratio",
     "onlyTags": "Display tags only",
+    "tagFilter": "Tag Filter",
+    "noTagOnly": "Untagged only",
     "batchAddUserGroup": "Batch Add User Group",
     "batchAddUserGroupTip": "Select channels and add user groups. If a channel already has the group, it will be skipped.",
     "searchChannelPlaceholder": "Enter channel name to search (leave empty to get all channels)",
@@ -250,14 +310,41 @@
     "selectModelToAdd": "Select or input models to add",
     "pleaseSelectModel": "Please select or input models",
     "pleaseSelectChannelsForModel": "Please select at least one channel",
-    "channelAlreadyHasModel": "(Already has some models)",
+    "channelAlreadyHasAllModels": "(Already has all selected models)",
     "currentModels": "Current models",
     "noModels": "None",
     "addingModel": "Adding...",
     "addModelToChannels": "Add models to {{count}} channels",
     "batchAddModelSuccess": "Successfully added models \"{{model}}\" to {{count}} channels",
     "modelInputTip": "Supports multiple models, separated by commas",
-    "loadingChannels": "Loading channels..."
+    "loadingChannels": "Loading channels...",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "pageInfo": "Page {{page}} / {{total}}",
+    "selectionStatus": "Selected {{selected}} (on page {{onPage}}) / {{count}} on page / {{total}} matched",
+    "selectionStatusFiltered": "Selected {{selected}} (on page {{onPage}}) / {{count}} strict matches on page / {{total}} fuzzy-matched on server",
+    "selectCurrentPage": "Select current page",
+    "unselectCurrentPage": "Unselect current page",
+    "clearSelection": "Clear selection",
+    "clearKeyword": "Clear keyword",
+    "channelOnlyHasThisModel": "(Only model left — cannot delete)",
+    "channelAlreadyHasPartialModels": "(Some models already present)",
+    "batchDeleteTipV2": "Search uses fuzzy matching but the list is strictly filtered by exact model name. Channels with this as their only model are disabled to avoid emptying.",
+    "batchAzureAPITip": "Select Azure-type channels and replace their API version. First search by current version (leave blank to list all Azure channels), then enter the new version to replace.",
+    "currentAzureAPIVersion": "Current version",
+    "newAzureAPIVersion": "New version",
+    "replaceAzureAPIVersion": "Replace API version on {{count}} channels",
+    "replacing": "Replacing...",
+    "confirmDeleteModel": "Delete model \"{{model}}\" from {{count}} channels",
+    "deleting": "Deleting...",
+    "modelToDelete": "Model name to delete (exact match)",
+    "delModelEmptyHint": "Enter a model name above and press Enter to search matching channels",
+    "azureApiSearchPlaceholder": "API version to search (leave blank for all Azure channels)",
+    "batchDeleteChannels": "Batch Delete Channels",
+    "batchDeleteChannelsConfirm": "Are you sure you want to delete the selected {{count}} channels? This action cannot be undone.",
+    "batchDeleteChannelsSuccess": "Successfully deleted {{count}} channels",
+    "deleteChannels": "Delete Channels",
+    "pleaseSelectChannels": "Please select channels to delete first"
   },
   "channel_row": {
     "auto": "automatic",
@@ -316,14 +403,43 @@
     "tagChannelsError": "Channel {{action}} failed: {{message}}",
     "tagChannelsSuccess": "The tag channel {{action}} is successful.",
     "weightUpdateError": "Weight update failed: {{message}}",
-    "weightUpdateSuccess": "Weight update successful"
+    "weightUpdateSuccess": "Weight update successful",
+    "costRatioUpdateSuccess": "Cost ratio update successful",
+    "costRatioUpdateError": "Cost ratio update failed: {{message}}",
+    "rowsPerPage": "Rows per page:",
+    "paginationDisplayedRows": "{{from}}-{{to}} of {{count}}",
+    "groupPriority": "Priority (group)",
+    "groupPriorityTip": "Applies to all channels under this tag",
+    "groupWeight": "Group Weight",
+    "groupWeightTip": "Applies to all channels under this tag",
+    "groupCostRatio": "Group Ratio",
+    "groupCostRatioTip": "Applies to all channels under this tag",
+    "groupCount": "{{count}} total",
+    "groupEnabled": "{{count}} on",
+    "groupDisabled": "{{count}} off",
+    "expandGroup": "Expand channel list",
+    "collapseGroup": "Collapse channel list",
+    "avgLabel": "Avg",
+    "sumLabel": "Total",
+    "groupStatusSummary": "{{count}} channels · {{enabled}} enabled / {{disabled}} disabled",
+    "mixed": "Mixed",
+    "mixedTip": "Channels under this tag have inconsistent type/group; group editing will overwrite them all to one",
+    "wholeGroup": "Group",
+    "groupPriorityLabel": "Priority (all)",
+    "groupWeightLabel": "Weight (all)",
+    "groupCostRatioLabel": "Ratio (all)"
   },
   "common": {
     "again": "Retry ({{count}})",
+    "languageSwitchPrompt": "It looks like your browser is set to {{language}}. Switch to it?",
+    "languageSwitchConfirm": "Switch",
+    "languageSwitchDismiss": "Not now",
     "back": "return",
     "bindOk": "Binding successful!",
     "cancel": "Cancel",
     "close": "closure",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
     "copyUrl": "Copy address",
     "create": "create",
     "currency": "USD",
@@ -361,9 +477,20 @@
     "action": "Action",
     "actions": "Operation",
     "noDataAvailable": "No data available",
+    "noSearchResults": "No matching results found",
     "pageSize": "Number of items per page",
     "search": "Search",
-    "total": "Total"
+    "searchFilters": "Search Filters",
+    "total": "Total",
+    "quotaInput": {
+      "equivalentTokens": "≈ {{tokens}} tokens",
+      "equivalentMoney": "≈ {{amount}}",
+      "precisionHint": "Will round to {{tokens}} tokens",
+      "toggleToCurrency": "Input as USD",
+      "toggleToToken": "Input as tokens",
+      "overDeductLimit": "⚠ Exceeds deduction limit ({{max}})"
+    },
+    "loading": "Loading..."
   },
   "dashboard": "Dashboard",
   "dashboard_index": {
@@ -416,7 +543,66 @@
     "sourceCode": "Source code under"
   },
   "home": {
-    "loadingErr": "Failed to load homepage content..."
+    "loadingErr": "Failed to load homepage content...",
+    "hero": {
+      "title": "Every model, one API",
+      "subtitle": "Aggregate OpenAI, Claude, Gemini, DeepSeek and dozens of providers behind one OpenAI-compatible API. Swap the base URL to connect; manage keys, billing, and logs in one place.",
+      "getStarted": "Get started",
+      "console": "Open console",
+      "viewPricing": "View pricing"
+    },
+    "stats": {
+      "channels": "Channel types",
+      "protocols": "Native protocols",
+      "openSource": "Open source"
+    },
+    "code": {
+      "title": "Three protocols, one address",
+      "subtitle": "OpenAI, Claude, and Gemini requests are proxied as-is.",
+      "reply": "Hi! I'm {{model}}, reached through Done Hub."
+    },
+    "providers": {
+      "title": "Dozens of providers, one API",
+      "subtitle": "Major models worldwide are wired in and normalized to an OpenAI-compatible format, with new providers added over time."
+    },
+    "features": {
+      "title": "More than a gateway",
+      "subtitle": "Channel routing, billing, usage logs, and native clients, all in one backend.",
+      "items": {
+        "routing": {
+          "title": "Channel routing",
+          "desc": "Split traffic by priority and weight; failed upstreams cool down and retry."
+        },
+        "billing": {
+          "title": "Billing & groups",
+          "desc": "Tokens, groups, pricing, quotas, and invoices keep costs traceable."
+        },
+        "observability": {
+          "title": "Logs & usage",
+          "desc": "RPM/TPM, spend, and request logs, with per-user CSV export."
+        },
+        "clients": {
+          "title": "Native clients",
+          "desc": "Point Claude Code, Gemini CLI, and Codex straight at it; each proxied on its native protocol."
+        }
+      }
+    },
+    "howItWorks": {
+      "title": "Up and running in four steps",
+      "subtitle": "From deploy to client, each step follows the real request path.",
+      "s1Title": "Deploy",
+      "s1Desc": "Run Done Hub with Docker and set the basics.",
+      "s2Title": "Add channels",
+      "s2Desc": "Enable OpenAI, Claude, Gemini and add upstream keys.",
+      "s3Title": "Connect clients",
+      "s3Desc": "OpenAI uses /v1, Claude /claude/v1, Gemini /gemini.",
+      "s4Title": "Operate",
+      "s4Desc": "Watch dashboards and logs; manage billing and channels."
+    },
+    "cta": {
+      "title": "Fully open source. Stars and contributions welcome.",
+      "github": "View on GitHub"
+    }
   },
   "inviteCard": {
     "copyButton": {
@@ -431,6 +617,7 @@
   "jump": "Redirecting...",
   "log": "Log",
   "invoice": "Monthly Bill",
+  "multi_user_stats": "Multi-User Token Stats",
   "midjourney": "Midjourney",
   "invoice_index": {
     "invoice": "Monthly Bill",
@@ -492,6 +679,7 @@
     "exporting": "Exporting...",
     "exportSuccess": "Export successful",
     "exportError": "Export failed",
+    "totalCost": "Total cost",
     "searchLogsInfo": "Please check the recharge records and invitation records in the logs. For recharge records, select the type [Recharge] in the log; for invitation records, select [System] in the log.",
     "timeLabel": "Time",
     "title": "Logs",
@@ -501,6 +689,9 @@
     "typeLabel": "Type",
     "userLabel": "User",
     "sourceIp": "Source IP",
+    "requestId": "Request ID",
+    "upstreamRequestId": "Upstream Request ID",
+    "requestIdentifier": "Request Identifier",
     "unknown": "Unknown",
     "logType": {
       "all": "All",
@@ -531,18 +722,25 @@
       "outputPrice": "Output Price",
       "groupRatio": "Group Ratio",
       "groupRatioValue": "Group Ratio",
+      "longContextRatio": "Long Context Ratio",
       "actualPrice": "Actual Price",
       "input": "Input",
       "output": "Output",
       "finalCalculation": "Final Calculation",
       "originalBilling": "Original Billing",
       "actualBilling": "Actual Billing",
+      "cost": "Cost",
+      "profit": "Profit",
       "calculationNote": "PS: This system calculates based on points, and all amounts are converted from points. 1 point = $0.000002, with a minimum spending of 1 point. This calculation is for reference only; actual charges may vary.",
       "times": "times"
     },
     "cachedReadTokens": "Cache read Tokens (* {{ ratio }})",
     "cachedWriteTokens": "Write tokens to cache (* {{ ratio }})",
-    "reasoningTokens": "Deduction Tokens (* {{ ratio }})"
+    "cachedWrite1hTokens": "Write tokens to cache 1h (* {{ ratio }})",
+    "openaiCacheWriteTokens": "Write tokens to cache (OpenAI) (* {{ ratio }})",
+    "reasoningTokens": "Deduction Tokens (* {{ ratio }})",
+    "inputImageTokens": "Input Image Tokens (* {{ ratio }})",
+    "outputImageTokens": "Output Image Tokens (* {{ ratio }})"
   },
   "login": {
     "codeRequired": "verification code must be filled",
@@ -567,7 +765,10 @@
     "wechatLoginInfo": "Please use WeChat to scan the QR code to follow the official account and enter the \"verification code\" to obtain the verification code (valid within three minutes)",
     "wechatVerificationCodeLogin": "WeChat verification code login",
     "useLinuxDoLogin": "Log in with LINUX DO",
-    "loggingIn": "Logging in..."
+    "loggingIn": "Logging in...",
+    "linuxDoCountError": "An error occurred, retrying for the {{count}} time...",
+    "linuxDoError": "Operation failed, redirecting to the login page...",
+    "linuxDoLogin": "LINUX DO Login"
   },
   "midjourneyPage": {
     "channel": "Channel",
@@ -600,6 +801,7 @@
     "modelName": "Model Name",
     "noneGroup": "Current group unavailable",
     "outputMultiplier": "Output Price",
+    "timesPrice": "Price per Call",
     "search": "Search model name or description",
     "times": "Pay per call",
     "tokens": "Pay per token",
@@ -612,7 +814,9 @@
     "free": "Free",
     "cached_tokens": "Cache Ratio",
     "cached_write_tokens": "Cache Write Ratio",
+    "cached_write_1h_tokens": "Cache Write 1h Ratio",
     "cached_read_tokens": "Cache Read Ratio",
+    "openai_cache_write_tokens": "OpenAI Cache Write Ratio",
     "reasoning_tokens": "Reasoning Ratio",
     "input_text_tokens": "Input Text Ratio",
     "output_text_tokens": "Output Text Ratio",
@@ -640,6 +844,10 @@
     "priceDetails": "Price Details",
     "priceNote": "Different groups have different prices. Switch groups in token management.",
     "otherInfo": "Other Information",
+    "longContext": "Long Context Pricing",
+    "shortContext": "Short context",
+    "longContextLabel": "Long context",
+    "longContextDesc": "When input exceeds {{threshold}} tokens, the whole request is billed at long context prices.",
     "totalModels": "Total {{count}} models",
     "noModelsFound": "No matching models found",
     "noModelsFoundTip": "Please try adjusting filters or search keywords",
@@ -749,10 +957,11 @@
     "currencyInfo5": "Example",
     "currencyInfo6": ": gpt-4 Input: $0.03 / 1K tokens Completion: $0.06 / 1K tokens",
     "currencyInfo7": "0.03 / 0.002 = 15, 0.06 / 0.002 = 30, input multiplier is 15, completion multiplier is 30",
-    "errPricesWarning": "There are models with incorrect supplier types, please configure them in time:",
+    "errPricesWarning": "There are models with incorrect supplier types, please configure them in time",
+    "modelCountLabel": "{{count}} in total",
     "multipleOperation": "Multiple Operation",
     "newButton": "New",
-    "noPriceModelWarning": "There are models without configured prices, please configure the prices in time:",
+    "noPriceModelWarning": "There are models without configured prices, please configure the prices in time",
     "refreshButton": "Refresh",
     "singleOperation": "Single Operation",
     "updatePricesButton": "Update Prices",
@@ -792,7 +1001,12 @@
     "noAvailableRatios": "No available extension ratio",
     "noExtraRatios": "No additional magnification rate is available, please select to add from the drop-down menu.",
     "promptRatio": "Leverage ratio",
-    "selectExtraRatio": "Select magnification ratio"
+    "selectExtraRatio": "Select magnification ratio",
+    "longContext": "Long Context Tier",
+    "longContextThreshold": "Threshold (tokens)",
+    "longContextInputRatio": "Input Ratio",
+    "longContextOutputRatio": "Output Ratio",
+    "longContextHelp": "When input tokens exceed the threshold, the whole request is billed at the ratios above. Leave the threshold empty or 0 to disable."
   },
   "profile": "Profile",
   "profilePage": {
@@ -805,6 +1019,10 @@
     "displayName": "Display Name",
     "generateToken": "Generate Access Token",
     "inputDisplayNamePlaceholder": "Enter display name",
+    "quotaRemindEnabled": "Receive Quota Reminder Emails",
+    "quotaRemindThreshold": "Quota Remind Threshold",
+    "quotaRemindThresholdPlaceholder": "Email reminder when remaining quota falls below this value; set 0 to notify only when quota is exhausted",
+    "quotaRemindThresholdDefault": "Leave empty to use the system default: {{default}}",
     "inputPasswordPlaceholder": "Enter password",
     "inputUsernamePlaceholder": "Enter username",
     "keepSafe": "Keep it safe. Reset immediately if leaked.",
@@ -898,7 +1116,17 @@
     "verificationCodeRequired": "Verification code is required",
     "verificationInfo": "Please try again in a few seconds, Turnstile is checking the user environment!",
     "registering": "Registering...",
-    "inviteCodeRequired": "Invite code is required"
+    "inviteCodeRequired": "Invite code is required",
+    "agreementRequired": "Please read and check to agree to the terms",
+    "agreementPrefix": "I have read and agree to ",
+    "userAgreement": "User Agreement",
+    "privacyPolicy": "Privacy Policy",
+    "agreementAnd": " and "
+  },
+  "legalConsentDialog": {
+    "title": "Terms Update",
+    "description": "The terms have been updated. Please read and agree to continue.",
+    "button": "Agree and continue"
   },
   "registerPage": {
     "alreadyHaveAccount": "Already have an account? Click to login"
@@ -913,14 +1141,23 @@
   "theme": {
     "auto": "Follow System",
     "light": "Light Mode",
-    "dark": "Dark Mode"
+    "dark": "Dark Mode",
+    "color": "Theme Color",
+    "colors": {
+      "default": "Default",
+      "blue": "Blue",
+      "cyan": "Cyan",
+      "purple": "Purple",
+      "red": "Red"
+    }
   },
   "setting_index": {
     "operationSettings": {
       "chatLinkSettings": {
         "info": "Configure chat links that take effect for chat in tokens and chat in Playground on the homepage. <br />In the links, you can use {key} to replace the user's token, {server} to replace the server address, and base64<[xxxxxx]> for base64 encoding. For example: {'https://chat.oneapi.pro/#/?settings={\"key\":\"sk-{key}\",\"url\":\"{server}\"}'}<br />If not configured, the following 4 links will be configured by default:<br />ChatGPT Next: {'https://chat.oneapi.pro/#/?settings={\"key\":\"{key}\",\"url\":\"{server}\"}'}<br />chatgpt-web-midjourney-proxy: {'https://vercel.ddaiai.com/#/?settings={\"key\":\"{key}\",\"url\":\"{server}\"}'}<br />AMA: {'ama://set-api-key?server={server}&key={key}'}<br />opencat: {'opencat://team/join?domain={server}&token={key}'}<br />Sort order: Higher values first, if values are equal then by configuration order",
         "save": "Save Chat Link Settings",
-        "title": "Chat Link Settings"
+        "title": "Chat Link Settings",
+        "builtinChatEnabled": "Enable Built-in Chat"
       },
       "generalSettings": {
         "approximateToken": "Use approximate method to estimate token count to reduce computation",
@@ -938,11 +1175,31 @@
           "label": "Retry Cooldown (seconds)",
           "placeholder": "Retry cooldown (seconds)"
         },
+        "retryCooldownPerStatus": {
+          "title": "Per-Status Cooldown",
+          "description": "Freeze granularity: channel + model. Priority: upstream retryDelay > per-status > retry cooldown (429 only).",
+          "openTooltip": "Configure per-status cooldown",
+          "customHelper": "Seconds = 0 means do not freeze, just skip for the current request",
+          "statusCodeLabel": "Status Code",
+          "secondsLabel": "Cooldown (s)",
+          "delete": "Delete",
+          "addRule": "+ Add Rule",
+          "close": "Close",
+          "invalidStatusCode": "Status code \"{{code}}\" must be an integer between 100 and 599",
+          "invalidSeconds": "Cooldown seconds for status {{code}} must be a non-negative integer",
+          "duplicateStatusCode": "Status code {{code}} is duplicated; each status code can only be configured once"
+        },
         "retryTimes": {
           "label": "Retry Times",
           "placeholder": "Number of retries"
         },
         "saveButton": "Save General Settings",
+        "subGroups": {
+          "linkAndBilling": "Links & Billing",
+          "retry": "Retry Policy",
+          "upstreamError": "Upstream Error Handling",
+          "displayOptions": "Display & Billing Options"
+        },
         "title": "General Settings",
         "topUpLink": {
           "label": "Top-up Link",
@@ -952,6 +1209,12 @@
           "label": "Retry Timeout (seconds)",
           "placeholder": "Retry Timeout (seconds)"
         },
+        "channelFailErrorWrapEnabled": "Wrap upstream error message",
+        "channelFailErrorWrapEnabledTooltip": "When disabled, clients receive raw upstream error text (may contain key fragments, provider names and other sensitive info). Recommended only for temporary debugging.",
+        "channelFailErrorMessage": {
+          "label": "Channel Failure Unified Message",
+          "placeholder": "All non-400 upstream failures (401/403/404/429/5xx) collapse to this message + 503; leave blank for default"
+        },
         "emptyResponseBilling": "Empty Response Billing",
         "unifiedRequestResponseModel": "Unified Request Response Model",
         "unifiedRequestResponseModelTooltip": "When model mapping exists, the model value in the response will be the requested model value instead of the actual called model name",
@@ -960,6 +1223,8 @@
       },
       "logSettings": {
         "clearLogs": "Clear Historical Logs",
+        "autoDelete": "Enable Auto Deletion of Consumption Logs",
+        "autoDeleteDays": "Retention Days for Auto Deletion",
         "logCleanupTime": {
           "label": "Log Cleanup Time",
           "placeholder": "Log Cleanup Time"
@@ -970,6 +1235,7 @@
       "monitoringSettings": {
         "automaticDisableChannel": "Automatically Disable Channel on Failure",
         "automaticEnableChannel": "Automatically Enable Channel on Success",
+        "automaticDisableChannelNotify": "Send Notification on Automatic Channel Disable",
         "channelDisableThreshold": {
           "label": "Maximum Response Time",
           "placeholder": "In seconds, if all running channels exceed this time, the channel will be automatically disabled"
@@ -978,6 +1244,7 @@
           "label": "Quota Reminder Threshold",
           "placeholder": "When below this quota, an email will be sent to remind the user"
         },
+        "quotaRemindEnabled": "Enable Quota Reminder Emails",
         "saveMonitoringSettings": "Save Monitoring Settings",
         "title": "Monitoring Settings"
       },
@@ -1086,7 +1353,8 @@
           "label": "Default MaxToken quantity",
           "placeholder": "Please enter the default MaxToken quantity in JSON format, where \"default\" represents the default value. For example: {\"default\": 1000, \"claude-3-7-sonnet-latest\": 128000}"
         },
-        "save": "Save Claude's settings"
+        "save": "Save Claude's settings",
+        "title": "Claude Settings"
       },
       "geminiSettings": {
         "title": "Gemini Settings",
@@ -1095,9 +1363,22 @@
           "placeholder": "Please enter the models that need reasoning output enabled in JSON format, for example: {\"gemini-2.5-pro-preview-05-06\": true}"
         },
         "save": "Save Gemini Settings"
+      },
+      "invoice": {
+        "title": "Invoice Settings",
+        "genTime": "Invoice Time",
+        "genMonthInvoice": "Generate Monthly Invoice",
+        "updateMonthInvoice": "Update Monthly Invoice"
       }
     },
     "otherSettings": {
+      "languageSettings": {
+        "title": "Language Settings",
+        "defaultLanguageLabel": "Default Language",
+        "setDefaultLanguage": "Set Default Language",
+        "switchPromptEnabled": "Prompt users to switch language based on browser language",
+        "switchPromptTip": "When enabled, if a visitor's browser language differs from the current display language, they will be prompted once to switch. They will not be prompted again unless their browser language changes."
+      },
       "customSettings": {
         "aboutLabel": "About",
         "aboutPlaceholder": "Enter new about content here, supports Markdown & HTML code. If a link is entered, it will be used as the src attribute of the iframe, allowing you to set any web page as the about page.",
@@ -1130,6 +1411,15 @@
         "close": "Close",
         "newVersion": "New Version",
         "viewGitHub": "View on GitHub"
+      },
+      "legalSettings": {
+        "title": "User Agreement / Privacy Policy",
+        "userAgreementLabel": "User Agreement Content",
+        "userAgreementPlaceholder": "Enter the user agreement content here, supports HTML & Markdown",
+        "saveUserAgreement": "Save User Agreement",
+        "privacyPolicyLabel": "Privacy Policy Content",
+        "privacyPolicyPlaceholder": "Enter the privacy policy content here, supports HTML & Markdown",
+        "savePrivacyPolicy": "Save Privacy Policy"
       }
     },
     "systemSettings": {
@@ -1183,7 +1473,9 @@
         "passwordSettings": "Password Login",
         "thirdPartyLogin": "Third-Party Login",
         "turnstileCheck": "Enable Turnstile User Verification",
-        "weChatAuth": "Allow Login & Register via WeChat"
+        "weChatAuth": "Allow Login & Register via WeChat",
+        "userAgreementEnabled": "Enable User Agreement",
+        "privacyPolicyEnabled": "Enable Privacy Policy"
       },
       "configureOIDCAuthorization": {
         "alert1": "Fill in the homepage link",
@@ -1284,7 +1576,9 @@
     "tokenName": "Token Name",
     "type": "Type",
     "username": "Username",
-    "sourceIp": "Source IP"
+    "sourceIp": "Source IP",
+    "requestId": "Request ID",
+    "upstreamRequestId": "Upstream Request ID"
   },
   "task": "Asynchronous tasks",
   "taskPage": {
@@ -1367,8 +1661,8 @@
     "selectGroupInfo": "Select the channel group you want to use here. When the channel group is unavailable, backup channels will be used",
     "userGroup": "Group",
     "userBackupGroup": "Backup group",
-    "apiRate": "",
-    "apiRateTip": "",
+    "apiRate": "API Rate",
+    "apiRateTip": "The number of requests allowed per minute. When the rate is below 60, a counter limiter is used; when the rate is 60 or above, a token bucket limiter is used. Only effective when Redis is enabled.",
     "heartbeat": "Heartbeat setting (Experimental)",
     "heartbeatTip": "Heartbeat setting means that when you make a stream request, if there is no response for a long time, your client may disconnect due to the timeout mechanism. To prevent this, you can enable the heartbeat setting. When the request exceeds the start time you set and there is no response, we will send a heartbeat request every 5 seconds to keep the connection. Note: If you are using a relay program, please do not enable this setting, it may cause unexpected issues.",
     "heartbeatTimeout": "Heartbeat start time (unit: seconds)",
@@ -1382,7 +1676,32 @@
     "limits_ip_whitelist_info": "Restrict token access to specific IP addresses or ranges",
     "limits_ip_whitelist_switch": "Enable IP Whitelist",
     "limits_ip_whitelist_input": "IP Addresses",
-    "limits_ip_whitelist_helper": "Enter one IP address or CIDR range per line (e.g., 192.168.1.1 or 10.0.0.0/8)"
+    "limits_ip_whitelist_helper": "Enter one IP address or CIDR range per line (e.g., 192.168.1.1 or 10.0.0.0/8)",
+    "billingTag": "Billing Tag",
+    "billingTagInfo": "Used for billing statistics by group, only admins can set this",
+    "billingTagLabel": "Billing Tag",
+    "billingTagHelper": "Select a group as billing tag for tracking token costs by group",
+    "adminSearch": "Admin Search",
+    "adminSearchDesc": "Search all users' tokens by User ID or Token Key",
+    "userId": "User ID",
+    "userIdPlaceholder": "Enter user ID",
+    "tokenId": "Token ID",
+    "tokenIdPlaceholder": "Enter token ID",
+    "tokenKeySearch": "Token Key",
+    "tokenKeySearchPlaceholder": "Enter token key (prefix supported, sk- allowed)",
+    "search": "Search",
+    "clearSearch": "Clear",
+    "owner": "Owner",
+    "adminEditWarning": "You are editing this token as an administrator, you can change the token owner",
+    "transferToUser": "Owner User ID",
+    "transferToUserHelper": "Change user ID to transfer token ownership",
+    "accessedTime": "Last Used",
+    "tokenKey": "Key",
+    "createdSuccessTitle": "Token Created",
+    "createdSuccessTip": "Please keep this token safe and do not share it with others.",
+    "done": "Done",
+    "showKey": "Show key",
+    "hideKey": "Hide key"
   },
   "topup": "Top-up",
   "topupCard": {
@@ -1428,6 +1747,9 @@
     "id": "ID",
     "name": "Name",
     "nameTip": "Name for users",
+    "description": "Description",
+    "descriptionTip": "Visible to end users on group selectors. Up to 500 chars.",
+    "descriptionTooLong": "Description must be 500 characters or less",
     "public": "Is it public?",
     "promotion": "Auto Upgrade",
     "promotionTip": "When enabled, users will automatically upgrade to this group when their recharge amount meets the min-max conditions.",
@@ -1445,6 +1767,8 @@
     "adminUserRole": "administrator",
     "bind": "Bind",
     "cUserRole": "general user",
+    "reliableUserRole": "reliable internal staff",
+    "setReliable": "Set as reliable staff",
     "cancel": "Cancel",
     "cancelAdmin": "Cancel administrator",
     "createUser": "Create User",
@@ -1466,8 +1790,12 @@
     "refresh": "Refresh",
     "saveSuccess": "Saved successfully!",
     "searchPlaceholder": "Search for user ID, username, group, display name, or email address...",
+    "setCommonUser": "Set as common user",
     "setAdmin": "Set as administrator",
     "statistics": "Statistics",
+    "remainingShort": "Remaining",
+    "usedShort": "Used",
+    "requestCountShort": "Requests",
     "status": "Status",
     "submit": "Submit",
     "superAdminRole": "super administrator",
@@ -1478,8 +1806,8 @@
     "usernameRequired": "Username is required",
     "users": "Users",
     "changeQuota": "Change quota",
-    "changeQuotaHelperText": "Here is an increase or decrease, not a direct change to the user's balance. Enter dollars, you can deduct up to {{quota}} at most.",
-    "changeQuotaNotEmpty": "Please fill in the change amount.",
+    "changeQuotaHelperText": "This is an increase or decrease, not a direct change to the user's balance. You can deduct up to {{tokens}} tokens (≈ {{money}}) at most.",
+    "changeQuotaNotEmpty": "Change amount cannot be 0.",
     "changeQuotaNotEnough": "Cannot deduct an amount exceeding the user's balance.",
     "quotaRemark": "Remark"
   },

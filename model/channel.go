@@ -16,32 +16,36 @@ import (
 )
 
 type Channel struct {
-	Id                 int     `json:"id"`
-	Type               int     `json:"type" form:"type" gorm:"default:0"`
-	Key                string  `json:"key" form:"key" gorm:"type:text"`
-	Status             int     `json:"status" form:"status" gorm:"default:1"`
-	Name               string  `json:"name" form:"name" gorm:"index"`
-	Weight             *uint   `json:"weight" gorm:"default:1"`
-	CreatedTime        int64   `json:"created_time" gorm:"bigint"`
-	TestTime           int64   `json:"test_time" gorm:"bigint"`
-	ResponseTime       int     `json:"response_time"` // in milliseconds
-	BaseURL            *string `json:"base_url" gorm:"column:base_url;default:''"`
-	Other              string  `json:"other" form:"other"`
-	Balance            float64 `json:"balance"` // in USD
-	BalanceUpdatedTime int64   `json:"balance_updated_time" gorm:"bigint"`
-	Models             string  `json:"models" form:"models"`
-	Group              string  `json:"group" form:"group" gorm:"type:varchar(255);default:'default'"`
-	Tag                string  `json:"tag" form:"tag" gorm:"type:varchar(32);default:''"`
-	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
-	ModelMapping       *string `json:"model_mapping" gorm:"type:text"`
-	ModelHeaders       *string `json:"model_headers" gorm:"type:varchar(1024);default:''"`
-	CustomParameter    *string `json:"custom_parameter" gorm:"type:text"`
-	Priority           *int64  `json:"priority" gorm:"bigint;default:0"`
-	Proxy              *string `json:"proxy" gorm:"type:varchar(255);default:''"`
-	TestModel          string  `json:"test_model" form:"test_model" gorm:"type:varchar(50);default:''"`
-	OnlyChat           bool    `json:"only_chat" form:"only_chat" gorm:"default:false"`
-	PreCost            int     `json:"pre_cost" form:"pre_cost" gorm:"default:1"`
-	CompatibleResponse bool    `json:"compatible_response" gorm:"default:false"`
+	Id                 int      `json:"id"`
+	Type               int      `json:"type" form:"type" gorm:"default:0"`
+	Key                string   `json:"key" form:"key" gorm:"type:text"`
+	Status             int      `json:"status" form:"status" gorm:"default:1"`
+	Name               string   `json:"name" form:"name" gorm:"index"`
+	Weight             *uint    `json:"weight" gorm:"default:1"`
+	CreatedTime        int64    `json:"created_time" gorm:"bigint"`
+	TestTime           int64    `json:"test_time" gorm:"bigint"`
+	ResponseTime       int      `json:"response_time"` // in milliseconds
+	BaseURL            *string  `json:"base_url" gorm:"column:base_url;default:''"`
+	Other              string   `json:"other" form:"other"`
+	Balance            float64  `json:"balance"` // in USD
+	BalanceUpdatedTime int64    `json:"balance_updated_time" gorm:"bigint"`
+	Models             string   `json:"models" form:"models"`
+	Group              string   `json:"group" form:"group" gorm:"type:varchar(255);default:'default'"`
+	Tag                string   `json:"tag" form:"tag" gorm:"type:varchar(32);default:''"`
+	UsedQuota          int64    `json:"used_quota" gorm:"bigint;default:0"`
+	ModelMapping       *string  `json:"model_mapping" gorm:"type:text"`
+	ModelHeaders       *string  `json:"model_headers" gorm:"type:varchar(1024);default:''"`
+	HeaderOverride     *string  `json:"header_override" gorm:"type:text"`
+	CustomParameter    *string  `json:"custom_parameter" gorm:"type:text"`
+	Priority           *int64   `json:"priority" gorm:"bigint;default:0"`
+	Proxy              *string  `json:"proxy" gorm:"type:varchar(255);default:''"`
+	TestModel          string   `json:"test_model" form:"test_model" gorm:"type:varchar(50);default:''"`
+	OnlyChat           bool     `json:"only_chat" form:"only_chat" gorm:"default:false"`
+	PreCost            int      `json:"pre_cost" form:"pre_cost" gorm:"default:1"`
+	CompatibleResponse bool     `json:"compatible_response" gorm:"default:false"`
+	AllowExtraBody     bool     `json:"allow_extra_body" form:"allow_extra_body" gorm:"default:false"`
+	PassThroughBody    bool     `json:"pass_through_body" form:"pass_through_body" gorm:"default:false"`
+	CostRatio          *float64 `json:"cost_ratio" form:"cost_ratio" gorm:"type:decimal(10,4);default:0"`
 
 	DisabledStream *datatypes.JSONSlice[string] `json:"disabled_stream,omitempty" gorm:"type:json"`
 
@@ -67,8 +71,10 @@ var allowedChannelOrderFields = map[string]bool{
 	"status":        true,
 	"response_time": true,
 	"balance":       true,
+	"used_quota":    true,
 	"priority":      true,
 	"weight":        true,
+	"cost_ratio":    true,
 }
 
 type SearchChannelsParams struct {
@@ -82,7 +88,8 @@ func GetChannelsList(params *SearchChannelsParams) (*DataResult[Channel], error)
 	var channels []*Channel
 
 	db := DB.Omit("key")
-	tagDB := DB.Model(&Channel{}).Select("Max(id) as id").Where("tag != ''").Group("tag")
+	// 代表行取组内最小 id，与 GetChannelsTag 取 channels[0]（Order id ASC）保持一致
+	tagDB := DB.Model(&Channel{}).Select("MIN(id) as id").Where("tag != ''").Group("tag")
 
 	if params.Type != 0 {
 		db = db.Where("type = ?", params.Type)
@@ -95,8 +102,9 @@ func GetChannelsList(params *SearchChannelsParams) (*DataResult[Channel], error)
 	}
 
 	if params.Name != "" {
-		db = db.Where("name LIKE ?", "%"+params.Name+"%")
-		tagDB = tagDB.Where("tag LIKE ?", "%"+params.Name+"%")
+		like := "%" + params.Name + "%"
+		db = db.Where("name LIKE ? OR tag LIKE ?", like, like)
+		tagDB = tagDB.Where("name LIKE ? OR tag LIKE ?", like, like)
 	}
 
 	if params.Group != "" {
@@ -146,7 +154,47 @@ func GetChannelsList(params *SearchChannelsParams) (*DataResult[Channel], error)
 		db = db.Where("tag = '' OR id IN (?)", tagDB)
 	}
 
+	// 标签代表行只是组内最小 id 的那条渠道，默认排序会按它「自身」的列值排位；
+	// 但「已使用/余额/响应时间」展示的是整组合计/平均、「名称」展示的是标签名，
+	// 直接按自身值排会与显示值错位。这里对这几列改用标签感知表达式：
+	// 代表行按整组聚合排序、普通渠道仍按自身值，使排序与所见一致。
+	if order := strings.TrimSpace(params.Order); order != "" {
+		field, dir := order, "ASC"
+		if strings.HasPrefix(field, "-") {
+			field, dir = field[1:], "DESC"
+		}
+		if expr := tagAwareOrderExpr(field, dir); expr != "" {
+			db = db.Order(expr)
+			params.Order = "" // 已自定义排序，避免 PaginateAndOrder 对该列重复套用
+		}
+	}
+
 	return PaginateAndOrder(db, &params.PaginationParams, &channels, allowedChannelOrderFields)
+}
+
+// tagAwareOrderExpr 为「展示值=整组聚合」的列返回标签感知的排序表达式：标签代表行
+// (tag != ”) 按整组聚合排序，普通渠道 (tag = ”) 仍按自身列值；聚合口径与
+// GetChannelsTagAllList 的 _all 统计保持一致（SUM/SUM/已测平均）。返回 "" 表示该列
+// 代表行展示的就是自身值，无需特殊处理，交由通用排序。dir 取 "ASC"/"DESC"。
+func tagAwareOrderExpr(field, dir string) string {
+	var expr string
+	switch field {
+	case "used_quota":
+		expr = "CASE WHEN channels.tag = '' THEN channels.used_quota " +
+			"ELSE (SELECT SUM(c2.used_quota) FROM channels c2 WHERE c2.tag = channels.tag) END"
+	case "balance":
+		expr = "CASE WHEN channels.tag = '' THEN channels.balance " +
+			"ELSE (SELECT SUM(c2.balance) FROM channels c2 WHERE c2.tag = channels.tag) END"
+	case "response_time":
+		expr = "CASE WHEN channels.tag = '' THEN channels.response_time " +
+			"ELSE (SELECT AVG(CASE WHEN c2.response_time > 0 THEN c2.response_time ELSE NULL END) " +
+			"FROM channels c2 WHERE c2.tag = channels.tag) END"
+	case "name":
+		expr = "CASE WHEN channels.tag = '' THEN channels.name ELSE channels.tag END"
+	default:
+		return ""
+	}
+	return expr + " " + dir
 }
 
 func GetAllChannels() ([]*Channel, error) {
@@ -393,6 +441,13 @@ func (channel *Channel) GetPriority() int64 {
 	return *channel.Priority
 }
 
+func (channel *Channel) GetCostRatio() float64 {
+	if channel.CostRatio == nil || *channel.CostRatio <= 0 {
+		return 0
+	}
+	return *channel.CostRatio
+}
+
 func (channel *Channel) GetBaseURL() string {
 	if channel.BaseURL == nil {
 		return ""
@@ -531,6 +586,9 @@ func ClearChannelTokenCache(channelId int) {
 		fmt.Sprintf("api_token:codex:%d", channelId),
 		fmt.Sprintf("api_token:geminicli:%d", channelId),
 		fmt.Sprintf("api_token:claudecode:%d", channelId),
+		fmt.Sprintf("api_token:vertexai:%d", channelId),
+		fmt.Sprintf("api_token:gemini_sa:%d", channelId),
+		fmt.Sprintf("api_token:antigravity:%d", channelId),
 	}
 
 	for _, key := range cacheKeys {

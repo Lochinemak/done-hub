@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,11 +27,13 @@ type Quota struct {
 	groupRatio       float64
 	inputRatio       float64
 	outputRatio      float64
+	costRatio        float64
 	preConsumedQuota int
 	cacheQuota       int
 	userId           int
 	channelId        int
 	tokenId          int
+	unlimitedQuota   bool
 	HandelStatus     bool
 
 	startTime         time.Time
@@ -42,13 +45,14 @@ func NewQuota(c *gin.Context, modelName string, promptTokens int) *Quota {
 	isBackupGroup := c.GetBool("is_backupGroup")
 
 	quota := &Quota{
-		modelName:     modelName,
-		promptTokens:  promptTokens,
-		userId:        c.GetInt("id"),
-		channelId:     c.GetInt("channel_id"),
-		tokenId:       c.GetInt("token_id"),
-		HandelStatus:  false,
-		isBackupGroup: isBackupGroup, // 记录是否使用备用分组
+		modelName:      modelName,
+		promptTokens:   promptTokens,
+		userId:         c.GetInt("id"),
+		channelId:      c.GetInt("channel_id"),
+		tokenId:        c.GetInt("token_id"),
+		unlimitedQuota: c.GetBool("token_unlimited_quota"),
+		HandelStatus:   false,
+		isBackupGroup:  isBackupGroup, // 记录是否使用备用分组
 	}
 
 	quota.price = *model.PricingInstance.GetPrice(quota.modelName)
@@ -68,15 +72,21 @@ func NewQuota(c *gin.Context, modelName string, promptTokens int) *Quota {
 	quota.inputRatio = quota.price.GetInput() * quota.groupRatio
 	quota.outputRatio = quota.price.GetOutput() * quota.groupRatio
 
+	// 成本倍率：仅用于成本/利润统计，不参与用户扣费。未配置或取不到渠道时为 0（不计成本）。
+	quota.costRatio = 0
+	if channel := model.ChannelGroup.GetChannel(quota.channelId); channel != nil {
+		quota.costRatio = channel.GetCostRatio()
+	}
+
 	return quota
 
 }
 
 func (q *Quota) PreQuotaConsumption() *types.OpenAIErrorWithStatusCode {
 	if q.price.Type == model.TimesPriceType {
-		q.preConsumedQuota = int(1000 * q.inputRatio)
+		q.preConsumedQuota = common.QuotaFromFloat(1000 * q.inputRatio)
 	} else if q.price.Input != 0 || q.price.Output != 0 {
-		q.preConsumedQuota = int(float64(q.promptTokens)*q.inputRatio) + config.PreConsumedQuota
+		q.preConsumedQuota = common.QuotaFromFloat(float64(q.promptTokens)*q.inputRatio) + config.PreConsumedQuota
 	}
 
 	if q.preConsumedQuota == 0 {
@@ -119,7 +129,10 @@ func (q *Quota) UpdateUserRealtimeQuota(usage *types.UsageEvent, nowUsage *types
 	}
 
 	promptTokens, completionTokens := q.getComputeTokensByUsageEvent(nowUsage)
-	increaseQuota := q.GetTotalQuota(promptTokens, completionTokens, nil)
+	// 长上下文分档：实时路径逐增量结算，用累计输入 token（而非单次增量）判断档位，
+	// 与最终结算按整次请求原始输入判档的效果保持收敛；对本次增量套用分档倍率。
+	inRatio, outRatio := q.price.GetLongContextMultiplier(usage.InputTokens)
+	increaseQuota := q.calcQuota(promptTokens, completionTokens, q.inputRatio*inRatio, q.outputRatio*outRatio, q.groupRatio)
 
 	cacheQuota, err := model.CacheIncreaseUserRealtimeQuota(q.userId, increaseQuota)
 	if err != nil {
@@ -147,11 +160,12 @@ func (q *Quota) completedQuotaConsumption(usage *types.Usage, tokenName string, 
 	}()
 
 	quota := q.GetTotalQuotaByUsage(usage)
+	costQuota := q.GetCostQuotaByUsage(usage)
 
 	quotaDelta := quota - q.preConsumedQuota
 	var quotaErr error
 	if quotaDelta != 0 {
-		err := model.PostConsumeTokenQuota(q.tokenId, quotaDelta)
+		err := model.PostConsumeTokenQuotaWithInfo(q.tokenId, q.userId, q.unlimitedQuota, quotaDelta)
 		if err != nil {
 			quotaErr = errors.New("error consuming token remain quota: " + err.Error())
 			logger.LogError(ctx, quotaErr.Error())
@@ -177,6 +191,7 @@ func (q *Quota) completedQuotaConsumption(usage *types.Usage, tokenName string, 
 		q.modelName,
 		tokenName,
 		quota,
+		costQuota,
 		"",
 		q.getRequestTime(),
 		isStream,
@@ -189,35 +204,89 @@ func (q *Quota) completedQuotaConsumption(usage *types.Usage, tokenName string, 
 }
 
 func (q *Quota) Undo(c *gin.Context) {
-	tokenId := c.GetInt("token_id")
-	if q.HandelStatus {
-		go func(ctx context.Context) {
-			// return pre-consumed quota
-			if err := model.PostConsumeTokenQuota(tokenId, -q.preConsumedQuota); err != nil {
-				logger.LogError(ctx, "error return pre-consumed quota: "+err.Error())
-			}
-			// 刷新缓存配额，保持一致
-			_ = model.CacheUpdateUserQuota(q.userId)
-		}(c.Request.Context())
+	if !q.HandelStatus {
+		return
 	}
+	// Undo 所有调用方都在 gin handler 同步路径上，panic 由 gin.Recovery 兜底（带 stack）。
+	// 不再加本地 recover：之前的"defense-in-depth"在已有 gin.Recovery 时是 anti-pattern：
+	// 截胡 panic 让上层拿不到信号、日志失去堆栈、可调试性反而下降。
+	ctx := c.Request.Context()
+	if err := model.PostConsumeTokenQuotaWithInfo(q.tokenId, q.userId, q.unlimitedQuota, -q.preConsumedQuota); err != nil {
+		logger.LogError(ctx, "error return pre-consumed quota: "+err.Error())
+	}
+	_ = model.CacheUpdateUserQuota(q.userId)
 }
 
 func (q *Quota) Consume(c *gin.Context, usage *types.Usage, isStream bool) {
-	tokenName := c.GetString("token_name")
-	sourceIp := c.ClientIP() // 在 goroutine 外提取，避免 Gin Context 回收后数据竞争
-	q.startTime = c.GetTime("requestStartTime")
-	// 如果没有报错，则消费配额
-	go func(ctx context.Context) {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.LogError(ctx, fmt.Sprintf("panic in completedQuotaConsumption: %v", r))
-			}
-		}()
-		err := q.completedQuotaConsumption(usage, tokenName, isStream, sourceIp, ctx)
-		if err != nil {
-			logger.LogError(ctx, err.Error())
+	// 同步调用方（handler 主流程）走这里：c 在调用栈上活着，直接当场 snapshot 即可。
+	// 异步调用方（TrackedGoroutine 路径）应直接调 ConsumeWithSnapshot，
+	// 在 spawn goroutine 之前先 NewConsumeSnapshot(c)，闭包持有快照值而非 c 指针，
+	// 彻底避免 handler return 后 c 被 gin pool 复用造成的数据竞争。
+	q.ConsumeWithSnapshot(NewConsumeSnapshot(c), usage, isStream)
+}
+
+// ConsumeSnapshot 是 Quota.Consume 需要的 gin.Context 字段的不可变快照。
+// 用于把 handler 派生 goroutine 上的 c 访问全部前置到 handler 还活着的时刻，
+// 闭包只持有值，杜绝 c-pool 复用窗口。
+type ConsumeSnapshot struct {
+	TokenName string
+	SourceIP  string
+	StartTime time.Time
+	Ctx       context.Context
+}
+
+// WithUpstreamRequestID 把 provider 在响应阶段暂存到 gin.Context 的上游 request id
+// （如 bedrock x-amzn-requestid）注入 ctx。model.RecordConsumeLog 约定从 ctx 读该值，
+// 因此每个 RecordConsumeLog 调用方都必须经本函数派生 ctx，否则 upstream_request_id
+// 列会静默留空。未暂存时原样返回 ctx（realtime/WS 的快照先于上游响应，拿不到值，
+// 日志该列留空即可）。
+func WithUpstreamRequestID(ctx context.Context, c *gin.Context) context.Context {
+	if upstreamRequestID := c.GetString(config.GinUpstreamRequestIdKey); upstreamRequestID != "" {
+		return context.WithValue(ctx, config.GinUpstreamRequestIdKey, upstreamRequestID)
+	}
+	return ctx
+}
+
+// NewConsumeSnapshot 立即从 c 抓取计费所需字段，构造不再持有 c 指针的快照。
+// 必须在 handler 还在调用栈上（c 仍归本请求所有）时调用。
+func NewConsumeSnapshot(c *gin.Context) ConsumeSnapshot {
+	// 上游 request id 随快照带走，供异步消费日志落库。普通 HTTP 路径在 send 之后取快照能拿到。
+	ctx := WithUpstreamRequestID(c.Request.Context(), c)
+	return ConsumeSnapshot{
+		TokenName: c.GetString("token_name"),
+		SourceIP:  c.ClientIP(),
+		StartTime: c.GetTime("requestStartTime"),
+		Ctx:       ctx,
+	}
+}
+
+// ConsumeWithSnapshot 用预先抓取好的快照执行同步扣费 + 写消费日志。
+// 同 Consume：DB/Cache 调用刻意不传 ctx，防客户端断连取消计费。
+//
+// recover 保留的理由：本函数被 realtime / task 的 TrackedGoroutine 异步路径调用，
+// 虽然外层 TrackedGoroutine 自带 stack-aware recover 兜底，但本地 recover 能给 panic
+// 加上 "Quota.ConsumeWithSnapshot" 的上下文标签 + 完整堆栈，定位 quota 步骤更直接。
+// 同步路径（Consume wrapper）下本地 recover 会截胡 gin.Recovery，但权衡后保留这层
+// 是因为异步路径 panic 没有 gin.Recovery 接，需要 quota 这层就抓住堆栈。
+//
+// 延迟成本（同步化的已知代价）：
+//   - BatchUpdateEnabled=true（推荐生产配置）：扣费/日志/统计全部走 in-memory append，
+//     同步路径上唯一真 IO 是 CacheUpdateUserQuota 一次 Redis 调用，~几 ms。
+//   - BatchUpdateEnabled=false：5 个调用里 4 个走真 DB UPDATE/INSERT，TTLB 增加 ~10-20ms。
+//
+// 这是反压换一致性的有意取舍：异步会让 handler 早返 200 但扣费 goroutine 在 DB 池满时堆积，
+// 正是"上游已计费、本地未记账"的真凶。
+func (q *Quota) ConsumeWithSnapshot(snap ConsumeSnapshot, usage *types.Usage, isStream bool) {
+	q.startTime = snap.StartTime
+	ctx := snap.Ctx
+	defer func() {
+		if r := recover(); r != nil {
+			logger.LogError(ctx, fmt.Sprintf("panic in Quota.ConsumeWithSnapshot: %v, stack: %s", r, string(debug.Stack())))
 		}
-	}(c.Request.Context())
+	}()
+	if err := q.completedQuotaConsumption(usage, snap.TokenName, isStream, snap.SourceIP, ctx); err != nil {
+		logger.LogError(ctx, err.Error())
+	}
 }
 
 func (q *Quota) GetInputRatio() float64 {
@@ -248,6 +317,12 @@ func (q *Quota) GetLogMeta(usage *types.Usage) map[string]any {
 			extraRatio := q.price.GetExtraRatio(key)
 			meta[key+"_ratio"] = extraRatio
 		}
+
+		// 长上下文分档命中时记录分档倍率，供日志详情展示。
+		if inRatio, outRatio := q.price.GetLongContextMultiplier(usage.PromptTokens); inRatio != 1 || outRatio != 1 {
+			meta["long_context_input_ratio"] = inRatio
+			meta["long_context_output_ratio"] = outRatio
+		}
 	}
 
 	if q.extraBillingData != nil {
@@ -261,31 +336,32 @@ func (q *Quota) getRequestTime() int {
 	return int(time.Since(q.startTime).Milliseconds())
 }
 
-// 通过 token 数获取消费配额
-func (q *Quota) GetTotalQuota(promptTokens, completionTokens int, extraBilling map[string]types.ExtraBilling) (quota int) {
+// calcQuota 按给定倍率计算配额。inputRatio/outputRatio 已含对应倍率（分组倍率或成本倍率），
+// ratio 用于额外计费项。销售额与成本共用同一计算逻辑，仅倍率不同。
+// 依赖调用方已通过 GetExtraBillingData 设置好 extraBillingData。
+func (q *Quota) calcQuota(promptTokens, completionTokens int, inputRatio, outputRatio, ratio float64) (quota int) {
 	if q.price.Type == model.TimesPriceType {
-		quota = int(1000 * q.inputRatio)
+		quota = common.QuotaFromFloat(1000 * inputRatio)
 	} else {
-		quota = int(math.Ceil((float64(promptTokens) * q.inputRatio) + (float64(completionTokens) * q.outputRatio)))
+		quota = common.QuotaFromFloat(math.Ceil((float64(promptTokens) * inputRatio) + (float64(completionTokens) * outputRatio)))
 	}
 
-	q.GetExtraBillingData(extraBilling)
 	extraBillingQuota := 0
 	if q.extraBillingData != nil {
 		for _, value := range q.extraBillingData {
-			extraBillingQuota += int(math.Ceil(
-				float64(value.Price)*float64(config.QuotaPerUnit),
-			)) * value.CallCount
+			extraBillingQuota += common.QuotaFromFloat(
+				math.Ceil(float64(value.Price)*float64(config.QuotaPerUnit)) * float64(value.CallCount),
+			)
 		}
 	}
 
 	if extraBillingQuota > 0 {
-		quota += int(math.Ceil(
-			float64(extraBillingQuota) * q.groupRatio,
+		quota += common.QuotaFromFloat(math.Ceil(
+			float64(extraBillingQuota) * ratio,
 		))
 	}
 
-	if q.inputRatio != 0 && quota <= 0 {
+	if inputRatio != 0 && quota <= 0 {
 		quota = 1
 	}
 	totalTokens := promptTokens + completionTokens
@@ -295,8 +371,10 @@ func (q *Quota) GetTotalQuota(promptTokens, completionTokens int, extraBilling m
 		quota = 0
 	}
 
-	// 如果禁用了空回复计费且没有输出token，则不计费
-	if !config.EmptyResponseBillingEnabled && completionTokens == 0 {
+	// 空回复计费闸对按次计费（times）属于误伤：按次语义是"调用成功即全额收"，
+	// 与 completion token 无关（Lyria 等音乐模型成功返回音频时 completionTokens 常为 0）。
+	// 仅对 token 计费类型生效；闸1（totalTokens==0，上游未成功返回）对两类都保留。
+	if q.price.Type != model.TimesPriceType && !config.EmptyResponseBillingEnabled && completionTokens == 0 {
 		quota = 0
 	}
 
@@ -342,7 +420,22 @@ func (q *Quota) getComputeTokensByUsageEvent(usage *types.UsageEvent) (promptTok
 // 通过 usage 获取消费配额
 func (q *Quota) GetTotalQuotaByUsage(usage *types.Usage) (quota int) {
 	promptTokens, completionTokens := q.getComputeTokensByUsage(usage)
-	return q.GetTotalQuota(promptTokens, completionTokens, usage.ExtraBilling)
+	// 长上下文分档：按原始输入 token（未经缓存折算）判断档位，超阈值时整次请求套用分档倍率。
+	inRatio, outRatio := q.price.GetLongContextMultiplier(usage.PromptTokens)
+	q.GetExtraBillingData(usage.ExtraBilling)
+	return q.calcQuota(promptTokens, completionTokens, q.inputRatio*inRatio, q.outputRatio*outRatio, q.groupRatio)
+}
+
+// GetCostQuotaByUsage 按渠道成本倍率计算本次请求的上游成本配额，仅用于成本/利润统计，不参与扣费。
+func (q *Quota) GetCostQuotaByUsage(usage *types.Usage) (costQuota int) {
+	// 未配置成本倍率时不计成本，省去无谓计算。
+	if q.costRatio <= 0 {
+		return 0
+	}
+	promptTokens, completionTokens := q.getComputeTokensByUsage(usage)
+	inRatio, outRatio := q.price.GetLongContextMultiplier(usage.PromptTokens)
+	q.GetExtraBillingData(usage.ExtraBilling)
+	return q.calcQuota(promptTokens, completionTokens, q.price.GetInput()*q.costRatio*inRatio, q.price.GetOutput()*q.costRatio*outRatio, q.costRatio)
 }
 
 func (q *Quota) GetFirstResponseTime() int64 {

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"done-hub/common/utils"
 	"encoding/json"
 	"errors"
@@ -248,7 +249,7 @@ func (r *OpenAIResponsesRequest) InputToMessages() ([]ChatCompletionMessage, err
 						Type: "function",
 						Function: &ChatCompletionToolCallsFunction{
 							Name:      item.Name,
-							Arguments: item.Arguments,
+							Arguments: item.ArgumentsString(),
 						},
 					},
 				},
@@ -290,8 +291,8 @@ type InputResponses struct {
 	AcknowledgedSafetyChecks any `json:"acknowledged_safety_checks,omitempty"`
 
 	// function_call
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 
 	// reasoning
 	Summary          *SummaryResponses `json:"summary,omitempty"`
@@ -441,9 +442,10 @@ type ResponsesTools struct {
 	MaxNumResults  uint     `json:"max_num_results,omitempty"`
 	RankingOptions any      `json:"ranking_options,omitempty"`
 	// Computer Use
-	DisplayWidth  uint   `json:"display_width,omitempty"`
-	DisplayHeight uint   `json:"display_height,omitempty"`
-	Environment   string `json:"environment,omitempty"`
+	DisplayWidth  uint `json:"display_width,omitempty"`
+	DisplayHeight uint `json:"display_height,omitempty"`
+	// environment 为 string（computer_use 枚举）或 object（shell 工具的 {type, skills...}），故用 any 兼容两种形态
+	Environment any `json:"environment,omitempty"`
 	// Function / Namespace shared
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -540,9 +542,13 @@ type TextResponses struct {
 }
 
 func (cc *OpenAIResponsesResponses) GetContent() string {
+	// 兼容推理模型/纯 tool_call：非流式输出可能落在 reasoning summary 或 function_call arguments 而非 message。
+	// 仅用于 completion token 兜底估算（billing），reasoning 与 tool_call arguments 均为计费的 output token。
 	var content string
 	for _, output := range cc.Output {
 		content += output.StringContent()
+		content += output.GetSummaryString()
+		content += output.ArgumentsString()
 	}
 	return content
 }
@@ -590,6 +596,39 @@ func (m ResponsesOutput) GetSummaryString() string {
 	return summary
 }
 
+func (m ResponsesOutput) ArgumentsString() string {
+	return jsonRawMessageToString(m.Arguments)
+}
+
+func (i InputResponses) ArgumentsString() string {
+	return jsonRawMessageToString(i.Arguments)
+}
+
+// jsonRawMessageToString 把 arguments 统一为 Chat 接口期望的字符串形式：
+// 上游按规范返回 JSON 字符串字面量时解码后返回；返回 object/array 等其他类型时原样返回字面量。
+func jsonRawMessageToString(data json.RawMessage) string {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+	if trimmed[0] != '"' {
+		return string(trimmed)
+	}
+	var value string
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return string(trimmed)
+	}
+	return value
+}
+
+// ArgumentsFromString 把 Chat 形式的字符串 arguments 编码为 json.RawMessage。
+// 空字符串编码为 JSON 字面量 ""，对齐 *string 时代非 nil 指针的序列化行为，
+// 避免 added/done 事件在空参数时整字段省略。
+func ArgumentsFromString(s string) json.RawMessage {
+	b, _ := json.Marshal(s)
+	return b
+}
+
 type IncompleteDetail struct {
 	Reason string `json:"reason,omitempty"`
 }
@@ -603,7 +642,7 @@ type ResponsesOutput struct {
 
 	Queries             any                `json:"queries,omitempty"`
 	Results             any                `json:"results,omitempty"`
-	Arguments           *string            `json:"arguments,omitempty"`
+	Arguments           json.RawMessage    `json:"arguments,omitempty"`
 	CallID              string             `json:"call_id,omitempty"`
 	Name                string             `json:"name,omitempty"`
 	Action              any                `json:"action,omitempty"`
@@ -692,6 +731,11 @@ type ResponsesUsage struct {
 
 type ResponsesUsageOutputTokensDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
+	// image/text 明细：image generation 端点（gpt-image-*）的 output_tokens_details
+	// 官方同时返回 image_tokens 与 text_tokens。omitempty 使 Responses 端点（输出侧
+	// 仅有 reasoning）不多输出零值字段，保持与官方对齐。
+	ImageTokens int `json:"image_tokens,omitempty"`
+	TextTokens  int `json:"text_tokens,omitempty"`
 }
 
 type ResponsesUsageInputTokensDetails struct {
@@ -709,6 +753,8 @@ func (u *ResponsesUsage) ToOpenAIUsage() *Usage {
 
 	if u.OutputTokensDetails != nil {
 		usage.CompletionTokensDetails.ReasoningTokens = u.OutputTokensDetails.ReasoningTokens
+		usage.CompletionTokensDetails.ImageTokens = u.OutputTokensDetails.ImageTokens
+		usage.CompletionTokensDetails.TextTokens = u.OutputTokensDetails.TextTokens
 	}
 
 	if u.InputTokensDetails != nil {
@@ -727,9 +773,13 @@ func (u *Usage) ToResponsesUsage() *ResponsesUsage {
 		TotalTokens:  u.TotalTokens,
 	}
 
-	if u.CompletionTokensDetails.ReasoningTokens > 0 {
+	if u.CompletionTokensDetails.ReasoningTokens > 0 ||
+		u.CompletionTokensDetails.ImageTokens > 0 ||
+		u.CompletionTokensDetails.TextTokens > 0 {
 		responsesUsage.OutputTokensDetails = &ResponsesUsageOutputTokensDetails{
 			ReasoningTokens: u.CompletionTokensDetails.ReasoningTokens,
+			ImageTokens:     u.CompletionTokensDetails.ImageTokens,
+			TextTokens:      u.CompletionTokensDetails.TextTokens,
 		}
 	}
 
@@ -806,7 +856,7 @@ func (cc *ChatCompletionResponse) ToResponses(request *OpenAIResponsesRequest) *
 					Status:    ResponseStatusCompleted,
 					CallID:    tool.Id,
 					Name:      tool.Function.Name,
-					Arguments: &tool.Function.Arguments,
+					Arguments: ArgumentsFromString(tool.Function.Arguments),
 				})
 			}
 		} else {
@@ -895,16 +945,12 @@ func (r *OpenAIResponsesResponses) ToChat() *ChatCompletionResponse {
 			if choice.Message.ToolCalls == nil {
 				choice.Message.ToolCalls = make([]*ChatCompletionToolCalls, 0)
 			}
-			arguments := ""
-			if output.Arguments != nil {
-				arguments = *output.Arguments
-			}
 			choice.Message.ToolCalls = append(choice.Message.ToolCalls, &ChatCompletionToolCalls{
 				Id:   output.CallID,
 				Type: "function",
 				Function: &ChatCompletionToolCallsFunction{
 					Name:      output.Name,
-					Arguments: arguments,
+					Arguments: output.ArgumentsString(),
 				},
 			})
 			choice.FinishReason = FinishReasonToolCalls

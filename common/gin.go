@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,13 @@ func readBody(c *gin.Context) ([]byte, error) {
 		if data, ok := cached.([]byte); ok && data != nil {
 			return data, nil
 		}
+	}
+
+	// body 为 nil 时（如渠道测试用 http.NewRequest(..., nil) 构造的伪请求）直接返回空字节，
+	// 避免 buf.ReadFrom(nil) 触发 nil-pointer panic。上层透传逻辑读到空 body 会回退结构体序列化。
+	if c.Request == nil || c.Request.Body == nil {
+		c.Set(config.GinRequestBodyKey, []byte{})
+		return []byte{}, nil
 	}
 
 	size := c.Request.ContentLength
@@ -78,6 +86,35 @@ func UnmarshalBodyReusable(c *gin.Context, v any) error {
 	return nil
 }
 
+// 已知安全的网络错误短标识：仅追加这些固定短词到客户端可见消息，避免泄露 URL/IP/Key
+var safeNetErrPatterns = []string{
+	"no such host",
+	"connection refused",
+	"connection reset by peer",
+	"context deadline exceeded",
+	"TLS handshake timeout",
+	"handshake failure",
+	"unrecognized name",
+	"tunnel failed",
+	"Bad Gateway",
+	"i/o timeout",
+	"use of closed network connection",
+	"PROTOCOL_ERROR",
+	"internal error",
+	"EOF",
+}
+
+// SafeNetErrHint 从错误文本中匹配一个已知安全的网络错误短标识：命中白名单返回该短词，
+// 否则返回空串。供各 provider 在不泄露 URL/IP/Key 的前提下，向客户端暴露可读的网络失败原因。
+func SafeNetErrHint(errString string) string {
+	for _, p := range safeNetErrPatterns {
+		if strings.Contains(errString, p) {
+			return p
+		}
+	}
+	return ""
+}
+
 func ErrorWrapper(err error, code string, statusCode int) *types.OpenAIErrorWithStatusCode {
 	errString := "error"
 	if err != nil {
@@ -87,6 +124,9 @@ func ErrorWrapper(err error, code string, statusCode int) *types.OpenAIErrorWith
 	if strings.Contains(errString, "Post") || strings.Contains(errString, "dial") {
 		logger.SysError(fmt.Sprintf("error: %s", errString))
 		errString = "请求上游地址失败"
+		if hint := SafeNetErrHint(err.Error()); hint != "" {
+			errString = "请求上游地址失败: " + hint
+		}
 	}
 
 	return StringErrorWrapper(errString, code, statusCode)
@@ -123,6 +163,32 @@ func StringErrorWrapperLocal(err string, code string, statusCode int) *types.Ope
 	openaiErr.LocalError = true
 	return openaiErr
 
+}
+
+// UpstreamUnavailableError 构造"渠道整体不可用"类的 LocalError，专供 FilterOpenAIErr 坍缩使用。
+//
+// 之所以单独封装：StringErrorWrapper 把 Type 硬编码为 one_hub_error，第二参数赋给 Code；
+// 而 FilterOpenAIErr 的 collapse 路由依赖 Type == "upstream_unavailable" 作为内部 sentinel。
+// 调用方手工补一行 openaiErr.OpenAIError.Type = "upstream_unavailable" 容易漏写或拼错，
+// 因此把 sentinel 字符串和赋值步骤封进这里，唯一入口。
+//
+// 客户端永远看不到 Type=upstream_unavailable —— 要么被 collapse 改写成 system_error +
+// service_unavailable/rate_limit_exceeded，要么走 fall-through 段的 type 改写兜底。
+// Code 这里给 service_unavailable 是防御性默认值（万一某天有路径绕过 collapse），
+// 行业语义安全，不暴露上游身份。
+func UpstreamUnavailableError(msg string) *types.OpenAIErrorWithStatusCode {
+	e := StringErrorWrapperLocal(msg, "service_unavailable", http.StatusServiceUnavailable)
+	e.OpenAIError.Type = "upstream_unavailable"
+	return e
+}
+
+// ModelNotFoundError 构造 OpenAI 标准 model_not_found 错误（404 / invalid_request_error）。
+// 文案对齐 OpenAI 官方，不暴露内部分组结构。Type 非 upstream_unavailable，不触发 FilterOpenAIErr collapse。
+func ModelNotFoundError(modelName string) *types.OpenAIErrorWithStatusCode {
+	msg := fmt.Sprintf("The model `%s` does not exist or you do not have access to it.", modelName)
+	e := StringErrorWrapperLocal(msg, "model_not_found", http.StatusNotFound)
+	e.OpenAIError.Type = "invalid_request_error"
+	return e
 }
 
 func AbortWithMessage(c *gin.Context, statusCode int, message string) {

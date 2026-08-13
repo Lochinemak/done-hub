@@ -48,7 +48,13 @@ func RelayRecraftAI(c *gin.Context) {
 
 	recraftProvider, err := getRecraftProvider(c, model)
 	if err != nil {
-		common.AbortWithMessage(c, http.StatusServiceUnavailable, err.Error())
+		if IsModelNotFound(err) {
+			// 必须包成 {"error":...} 外层，否则 OpenAI SDK 读不到 code/type，model_not_found 语义失效。
+			errWithCode := FilterOpenAIErr(c, common.ModelNotFoundError(model))
+			relayResponseWithOpenAIErr(c, &errWithCode)
+		} else {
+			common.AbortWithMessage(c, http.StatusServiceUnavailable, err.Error())
+		}
 		return
 	}
 
@@ -72,7 +78,7 @@ func RelayRecraftAI(c *gin.Context) {
 	}
 
 	channel := recraftProvider.GetChannel()
-	go processChannelRelayError(c.Request.Context(), channel.Id, channel.Name, apiErr, channel.Type)
+	notifyChannelRelayError(c.Request.Context(), c, channel, apiErr)
 
 	retryTimes := config.RetryTimes
 	// 在重试开始前计算并缓存总渠道数，避免重试过程中动态变化
@@ -148,7 +154,7 @@ func RelayRecraftAI(c *gin.Context) {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("retry_failed model=%s channel_id=%d attempt=%d/%d status_code=%d error_type=\"%s\" error=\"%s\"",
 			modelName, channel.Id, attemptCount, actualRetryTimes, apiErr.StatusCode, apiErr.OpenAIError.Type, utils.TruncateBase64InMessage(apiErr.OpenAIError.Message)))
 
-		go processChannelRelayError(c.Request.Context(), channel.Id, channel.Name, apiErr, channel.Type)
+		notifyChannelRelayError(c.Request.Context(), c, channel, apiErr)
 		if !shouldRetry(c, apiErr, channel.Type) {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("retry_stop_condition model=%s channel_id=%d attempt=%d/%d should_retry=false",
 				modelName, channel.Id, attemptCount, actualRetryTimes))
@@ -164,7 +170,9 @@ func RelayRecraftAI(c *gin.Context) {
 
 	quota.Undo(c)
 	newErrWithCode := FilterOpenAIErr(c, apiErr)
-	common.AbortWithErr(c, newErrWithCode.StatusCode, &newErrWithCode.OpenAIError)
+	// 必须包成 {"error":...} 外层，与 main.go HandleJsonError 一致。
+	// 旧的 AbortWithErr(&OpenAIError) 让 gin 直接 marshal 结构体，OpenAI SDK 拿不到 error.code/type。
+	relayResponseWithOpenAIErr(c, &newErrWithCode)
 }
 
 func Path2RecraftAIModel(path string) string {

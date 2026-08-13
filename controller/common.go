@@ -5,17 +5,44 @@ import (
 	"done-hub/common/config"
 	"done-hub/common/logger"
 	"done-hub/common/notify"
+	"done-hub/common/redis"
+	"done-hub/common/utils"
 	"done-hub/model"
+	"done-hub/providers/gemini"
 	"done-hub/types"
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
+	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
+
+// disableNotifyDedupTTL 控制"渠道自动禁用通知"在跨节点之间的去重窗口。
+// 一次禁用动作在各节点上的并发抖动通常在秒级，5 分钟足够覆盖，
+// 又不会长到让人为重新禁用的二次通知被吞掉。
+const disableNotifyDedupTTL = 5 * time.Minute
+
+// shouldSendChannelDisableNotify 跨节点对"渠道自动禁用"通知去重：
+// 第一个 SETNX 成功的节点发邮件，其余节点静默。
+// Redis 未启用时跳过去重（同节点重复触发由 disableGroup singleflight 兜底）。
+// SETNX 抖动失败时宁可多发也不静默丢。
+func shouldSendChannelDisableNotify(channelId int) bool {
+	if !config.RedisEnabled {
+		return true
+	}
+	key := fmt.Sprintf("notify_lock:channel_disable:%d", channelId)
+	ok, err := redis.RedisSetNX(key, "1", disableNotifyDedupTTL)
+	if err != nil {
+		logger.SysError(fmt.Sprintf("notify dedup SETNX failed (channel=%d): %v", channelId, err))
+		return true
+	}
+	return ok
+}
 
 var disableGroup singleflight.Group
 
@@ -24,6 +51,14 @@ var fileAccessPermissionRegex = regexp.MustCompile(`You do not have permission t
 
 // 模型限制为特定客户端使用的错误，这类错误不应该禁用渠道（渠道本身没问题，只是特定模型不可用）
 var modelRestrictedRegex = regexp.MustCompile(`(?i)restricted to .+ clients only`)
+
+// 实际只是单次请求路由错（如文字模型打到 /v1/images/generations），
+// 渠道本身没坏，不应禁用
+var imageGenNotEnabledRegex = regexp.MustCompile(`(?i)image generation is not enabled for this group`)
+
+var geminiUnrestrictedKeyWarningRegex = regexp.MustCompile(`(?i)accessing Gemini API with one or more unrestricted keys`)
+
+var geminiCallerNoPermissionRegex = regexp.MustCompile(`(?i)The caller does not have permission`)
 
 func shouldEnableChannel(err error, openAIErr *types.OpenAIErrorWithStatusCode) bool {
 	if !config.AutomaticEnableChannelEnabled {
@@ -43,17 +78,50 @@ func ShouldDisableChannel(channelType int, err *types.OpenAIErrorWithStatusCode)
 		return false
 	}
 
-	// 检查是否为特定的文件访问权限错误，这类错误不应该禁用渠道
-	if fileAccessPermissionRegex.MatchString(err.OpenAIError.Message) {
+	// 上游通过 Retry-After / RetryInfo 等机制给出了精确的恢复时间 →
+	// 视为 transient failure，交由渠道+模型粒度的冷却处理，不做永久禁用。
+	// 参考 RFC 6585 §4 / RFC 7231 §7.1.3。
+	// 这一层让位关键词匹配等启发式判定，避免日配额/分钟限流等可自愈错误被永久禁用并发邮件。
+	if err.RateLimitResetAt > time.Now().Unix() {
 		return false
 	}
 
-	// 检查是否为模型限制为特定客户端的错误，这类错误不应该禁用渠道
-	if modelRestrictedRegex.MatchString(err.OpenAIError.Message) {
+	// 用户在禁用关键词里显式配置的文案，优先级高于下面所有"默认豁免"白名单：
+	// 既然用户明确要禁这类消息，启发式豁免就必须让位，否则用户配了也禁不掉。
+	// 注意：关键词匹配大小写敏感，用户须按上游原文大小写配置才能命中。
+	userKeywordHit := common.DisableChannelKeywordsInstance.IsContains(err.OpenAIError.Message)
+
+	// 检查是否为特定的文件访问权限错误，这类错误不应该禁用渠道（用户显式配置可覆盖）
+	if !userKeywordHit && fileAccessPermissionRegex.MatchString(err.OpenAIError.Message) {
 		return false
 	}
 
-	// 状态码检查（优先级最高）
+	// 检查是否为模型限制为特定客户端的错误，这类错误不应该禁用渠道（用户显式配置可覆盖）
+	if !userKeywordHit && modelRestrictedRegex.MatchString(err.OpenAIError.Message) {
+		return false
+	}
+
+	// 上游因图像生成未开放返回的 permission_error 只是单次请求级别的能力限制，渠道本身没坏（用户显式配置可覆盖）
+	if !userKeywordHit && imageGenNotEnabledRegex.MatchString(err.OpenAIError.Message) {
+		return false
+	}
+
+	// Gemini 未限制 key 的过渡期预告警告（403），渠道本身没坏，不应禁用（必须放在 403 状态码规则之前；用户显式配置可覆盖）
+	if !userKeywordHit && geminiUnrestrictedKeyWarningRegex.MatchString(err.OpenAIError.Message) {
+		return false
+	}
+
+	// Gemini/GCP 代理层抖动成片返回的 403 caller 权限错，多为 transient 级联，默认不永久禁用（必须放在 403 状态码规则之前；用户显式配置可覆盖）
+	if !userKeywordHit && geminiCallerNoPermissionRegex.MatchString(err.OpenAIError.Message) {
+		return false
+	}
+
+	// CachedContent 引用失效，渠道本身没坏，不应禁用（必须放在 403 状态码规则之前；用户显式配置可覆盖）
+	if !userKeywordHit && strings.Contains(err.OpenAIError.Message, gemini.CachedContentNotFoundMsg) {
+		return false
+	}
+
+	// 状态码检查（在关键词 / code / type 之上；白名单短路已在前面处理）
 	if err.StatusCode == http.StatusUnauthorized {
 		return true
 	}
@@ -65,8 +133,8 @@ func ShouldDisableChannel(channelType int, err *types.OpenAIErrorWithStatusCode)
 		}
 	}
 
-	// 禁用关键词检查
-	if common.DisableChannelKeywordsInstance.IsContains(err.OpenAIError.Message) {
+	// 禁用关键词检查（命中结果已在前面白名单判定时算过，直接复用）
+	if userKeywordHit {
 		return true
 	}
 
@@ -110,10 +178,12 @@ func DisableChannel(channelId int, channelName string, reason string, sendNotify
 		// 执行禁用操作
 		model.UpdateChannelStatusById(channelId, config.ChannelStatusAutoDisabled)
 
-		// 发送通知
-		if sendNotify {
+		// 发送通知：受全局开关控制，并通过 SETNX 在多节点间去重。
+		// reason 可能来自上游 err.Message,可能包含 URL/IP/api_key 等敏感串,
+		// 通知会直达运维收件人,这里强制脱敏。
+		if sendNotify && config.AutomaticDisableChannelNotifyEnabled && shouldSendChannelDisableNotify(channelId) {
 			subject := fmt.Sprintf("通道「%s」（#%d）已被禁用", channelName, channelId)
-			content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s", channelName, channelId, reason)
+			content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s", channelName, channelId, utils.MaskSensitiveInfo(reason))
 			notify.Send(subject, content)
 		}
 

@@ -3,12 +3,14 @@ package relay
 import (
 	"done-hub/common"
 	"done-hub/common/config"
+	"done-hub/common/logger"
 	"done-hub/common/requester"
 	"done-hub/providers/gemini"
 	"done-hub/safty"
 	"done-hub/types"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -142,6 +144,10 @@ func (r *relayGeminiOnly) send() (err *types.OpenAIErrorWithStatusCode, done boo
 		var response requester.StreamReaderInterface[string]
 		response, err = chatProvider.CreateGeminiChatStream(r.geminiRequest)
 		if err != nil {
+			// cache 失效的 403 → 剥字段，让下一轮 retry 不再带上失效引用
+			r.handleCachedContentFailure(err)
+			// Gemini 3 thoughtSignature 跨 channel 校验失败 → 剥签名换哨兵
+			r.handleThoughtSignatureFailure(err)
 			return
 		}
 
@@ -162,6 +168,10 @@ func (r *relayGeminiOnly) send() (err *types.OpenAIErrorWithStatusCode, done boo
 		var response *gemini.GeminiChatResponse
 		response, err = chatProvider.CreateGeminiChat(r.geminiRequest)
 		if err != nil {
+			// cache 失效的 403 → 剥字段，让下一轮 retry 不再带上失效引用
+			r.handleCachedContentFailure(err)
+			// Gemini 3 thoughtSignature 跨 channel 校验失败 → 剥签名换哨兵
+			r.handleThoughtSignatureFailure(err)
 			return
 		}
 
@@ -189,6 +199,103 @@ func (r *relayGeminiOnly) releaseBody() {
 	r.c.Set(config.GinRequestBodyKey, nil)
 	r.c.Set(config.GinProcessedBytesKey, nil)
 	r.c.Set(config.GinProcessedBytesIsVertexAI, nil)
+}
+
+// handleCachedContentFailure 撞上 "CachedContent not found" 后剥掉 cachedContent，
+// 让下一轮 retry 复用已 clean 的 body 但不再带失效引用。
+// AllowGeminiChannelType 下两类 provider 用不同缓存：
+//   - Gemini / VertexAI / VertexAIExpress: 写 GinProcessedBytesKey (bytes)；读取顺序 bytes → raw → map
+//   - GeminiCli / Antigravity:             写 GinProcessedBodyKey (map)；只读 map 系列，不读 bytes 缓存
+//
+// 两个 key 都尝试剥可覆盖：同组渠道间 retry、以及 "cli/antigravity 首攻 → Gemini 家 retry 通过 map 回退命中"。
+// 反方向（Gemini 家首攻 → cli/antigravity retry）会撞预先存在的 "request body not found"——
+// 因为 SetProcessedBodyBytes 会 nil 掉 raw bytes 和 raw map，cli 这边没东西可读。本函数不解决这条。
+func (r *relayGeminiOnly) handleCachedContentFailure(apiErr *types.OpenAIErrorWithStatusCode) {
+	if apiErr == nil || apiErr.StatusCode != http.StatusForbidden {
+		return
+	}
+	if !strings.Contains(apiErr.OpenAIError.Message, gemini.CachedContentNotFoundMsg) {
+		return
+	}
+
+	stripped := false
+	// bytes 路径：Gemini / VertexAI / VertexAIExpress provider
+	if raw, ok := r.c.Get(config.GinProcessedBytesKey); ok {
+		if data, ok := raw.([]byte); ok && len(data) > 0 {
+			r.c.Set(config.GinProcessedBytesKey, gemini.StripCachedContentBytes(data))
+			stripped = true
+		}
+	}
+	// map 路径：GeminiCli / Antigravity provider
+	if raw, ok := r.c.Get(config.GinProcessedBodyKey); ok {
+		if m, ok := raw.(map[string]interface{}); ok {
+			gemini.StripCachedContentMap(m)
+			stripped = true
+		}
+	}
+	if !stripped {
+		return
+	}
+
+	var channelId int
+	if r.provider != nil {
+		if ch := r.provider.GetChannel(); ch != nil {
+			channelId = ch.Id
+		}
+	}
+	logger.LogWarn(r.c.Request.Context(), fmt.Sprintf(
+		"gemini_cached_content_stripped reason=upstream_cache_invalid model=%s channel_id=%d",
+		r.modelName, channelId))
+}
+
+// handleThoughtSignatureFailure 撞上 thoughtSignature 不可用类错误后（文案见
+// gemini.IsThoughtSignatureFailure，如 "Thought signature is not valid" /
+// "Corrupted thought signature"）把请求里所有 thoughtSignature 替换为官方哨兵
+// skip_thought_signature_validator，让下一轮 retry 在新 channel 上跳过签名校验。
+//
+// 触发场景：客户端 history 携带的 thoughtSignature 由原 channel 的上游账号签发，
+// 当前请求被调度到新 channel/key → 上游回 400（签名无法识别或被判损坏）。
+// 实测在 done-hub 上 gemini-3.1-flash-lite-preview 多 key 渠道下 5 次有 4 次撞。
+//
+// 缓存策略与 handleCachedContentFailure 对齐：只处理 GinProcessedBytesKey
+// （Gemini / VertexAI / VertexAIExpress provider 写入的 bytes 缓存）。
+// Antigravity 自有 applyThinkingSignatureSentinel 在请求前注入哨兵，不需要在此处理；
+// GeminiCli 走 SDK 链路通常不带客户端原签名。
+//
+// 本函数只负责改写 body；retry 决策与 thought_signature_retried 标志由
+// shouldRetryBadRequest 集中管理。
+func (r *relayGeminiOnly) handleThoughtSignatureFailure(apiErr *types.OpenAIErrorWithStatusCode) {
+	if apiErr == nil || apiErr.StatusCode != http.StatusBadRequest {
+		return
+	}
+	if !gemini.IsThoughtSignatureFailure(apiErr.OpenAIError.Message) {
+		return
+	}
+
+	raw, ok := r.c.Get(config.GinProcessedBytesKey)
+	if !ok {
+		return
+	}
+	data, ok := raw.([]byte)
+	if !ok || len(data) == 0 {
+		return
+	}
+
+	replaced, count := gemini.ReplaceThoughtSignaturesBytes(data)
+	if count == 0 {
+		return
+	}
+	r.c.Set(config.GinProcessedBytesKey, replaced)
+
+	var channelId int
+	if r.provider != nil {
+		if ch := r.provider.GetChannel(); ch != nil {
+			channelId = ch.Id
+		}
+	}
+	logger.LogWarn(r.c.Request.Context(), fmt.Sprintf(
+		"gemini_thought_signature_replaced reason=upstream_validation_failed model=%s channel_id=%d replaced=%d",
+		r.modelName, channelId, count))
 }
 
 func (r *relayGeminiOnly) GetError(err *types.OpenAIErrorWithStatusCode) (int, any) {

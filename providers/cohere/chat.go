@@ -12,11 +12,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 type CohereStreamHandler struct {
 	Usage    *types.Usage
 	Request  *types.ChatCompletionRequest
+	Context  *gin.Context
 	msgID    string
 	startMsg bool
 }
@@ -54,6 +57,7 @@ func (p *CohereProvider) CreateChatCompletionStream(request *types.ChatCompletio
 	chatHandler := &CohereStreamHandler{
 		Usage:   p.Usage,
 		Request: request,
+		Context: p.Context,
 	}
 
 	return requester.RequestStream(p.Requester, resp, chatHandler.HandlerStream)
@@ -219,13 +223,15 @@ func (h *CohereStreamHandler) convertToOpenaiStream(cohereResponse *ChatStreamRe
 		}
 
 		h.Usage.TextBuilder.WriteString(choice.Delta.Content)
+		// tool call 的 name/arguments 属 output token，流中断兜底估算须计入（与 types.GetResponseText 口径一致）
+		h.Usage.TextBuilder.WriteString(choice.Delta.GetToolCallsText())
 	}
 
 	chatCompletion := types.ChatCompletionStreamResponse{
 		ID:      h.msgID,
 		Object:  "chat.completion.chunk",
 		Created: utils.GetTimestamp(),
-		Model:   h.Request.Model,
+		Model:   base.GetResponseModelNameFromContext(h.Context, h.Request.Model),
 		Choices: []types.ChatCompletionStreamChoice{choice},
 	}
 

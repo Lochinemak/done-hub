@@ -2,7 +2,7 @@ import PropTypes from 'prop-types';
 import * as Yup from 'yup';
 import { Formik } from 'formik';
 import { useTheme } from '@mui/material/styles';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -36,6 +36,38 @@ import { useTranslation } from 'react-i18next';
 import ToggleButtonGroup from 'ui-component/ToggleButton';
 import Decimal from 'decimal.js';
 import { ExtraRatiosSelector } from './ExtraRatiosSelector';
+import { LongContextSelector } from './LongContextSelector';
+
+// rate 是后端存储的基准单位；USD/RMB × K/M 通过 rate 中转换算
+// 基准：1 rate = $0.002 / 1K tokens（同时 1 rate = ¥0.014 / 1K，暗藏汇率 7）
+// priceType='times' 表示按次计费，K/M 单位无意义，conversion 强制忽略
+const valueToRate = (value, unitType, localUnit, priceType) => {
+  if (value === '' || value == null) return '';
+  const v = new Decimal(value);
+  if (unitType === 'rate') return Number(v.toFixed(4));
+  let r = v;
+  if (priceType !== 'times' && localUnit === 'M') r = r.div(1000);
+  if (unitType === 'USD') r = r.div(0.002);
+  if (unitType === 'RMB') r = r.div(0.014);
+  return Number(r.toFixed(4));
+};
+
+const rateToValue = (rate, unitType, localUnit, priceType) => {
+  if (rate === '' || rate == null) return '';
+  const r = new Decimal(rate);
+  if (unitType === 'rate') return Number(r.toFixed(4));
+  let v = r;
+  if (unitType === 'USD') v = v.mul(0.002);
+  if (unitType === 'RMB') v = v.mul(0.014);
+  if (priceType !== 'times' && localUnit === 'M') v = v.mul(1000);
+  return Number(v.toFixed(6));
+};
+
+const convertUnit = (value, fromType, fromUnit, toType, toUnit, priceType) => {
+  if (fromType === toType && fromUnit === toUnit) return value;
+  const rate = valueToRate(value, fromType, fromUnit, priceType);
+  return rateToValue(rate, toType, toUnit, priceType);
+};
 
 const icon = <CheckBoxOutlineBlankIcon fontSize="small" />;
 const checkedIcon = <CheckBoxIcon fontSize="small" />;
@@ -61,11 +93,19 @@ const validateSingleMode = (t, values, rows) => {
     return t('pricing_edit.modelNameRe');
   }
 
-  if (values.input === '' || values.input < 0) {
-    return t('pricing_edit.inputVal');
-  }
-  if (values.output === '' || values.output < 0) {
-    return t('pricing_edit.outputVal');
+  // 按次计费时只验证单次价格（input字段）
+  if (values.type === 'times') {
+    if (values.input === '' || values.input < 0) {
+      return t('pricing_edit.inputVal');
+    }
+  } else {
+    // 按Token计费时验证输入输出价格
+    if (values.input === '' || values.input < 0) {
+      return t('pricing_edit.inputVal');
+    }
+    if (values.output === '' || values.output < 0) {
+      return t('pricing_edit.outputVal');
+    }
   }
   return false;
 };
@@ -76,8 +116,21 @@ const getValidationSchema = (t) =>
     is_edit: Yup.boolean(),
     type: Yup.string().oneOf(['tokens', 'times'], t('pricing_edit.typeErr')).required(t('pricing_edit.requiredType')),
     channel_type: Yup.number().min(1, t('pricing_edit.channelTypeErr')).required(t('pricing_edit.requiredChannelType')),
-    input: Yup.number().required(t('pricing_edit.requiredInput')),
-    output: Yup.number().required(t('pricing_edit.requiredOutput')),
+    input: Yup.number()
+      .required(t('pricing_edit.requiredInput'))
+      .test('isPositive', t('pricing_edit.inputVal'), (value) => value !== '' && value >= 0),
+    output: Yup.number().when('type', {
+      is: 'tokens',
+      then: (schema) =>
+        schema
+          .required(t('pricing_edit.requiredOutput'))
+          .test('isPositive', t('pricing_edit.outputVal'), (value) => value !== '' && value >= 0),
+      otherwise: (schema) =>
+        schema
+          .notRequired()
+          .nullable()
+          .transform((value) => (value === undefined || value === '' ? null : value))
+    }),
     models: Yup.array().min(1, t('pricing_edit.requiredModels'))
   });
 
@@ -90,7 +143,8 @@ const multipleOriginInputs = {
   output: 0,
   locked: false,
   models: [],
-  extra_ratios: {}
+  extra_ratios: {},
+  long_context: {}
 };
 
 // 单一模式初始值
@@ -101,7 +155,19 @@ const singleOriginInputs = {
   input: 0,
   output: 0,
   locked: false,
-  extra_ratios: {}
+  extra_ratios: {},
+  long_context: {}
+};
+
+// 归一化长上下文分档：阈值 <= 0 视为未启用，返回 null 不落库。
+const normalizeLongContext = (longContext) => {
+  const threshold = Number(longContext?.threshold) || 0;
+  if (threshold <= 0) return null;
+  return {
+    threshold,
+    input_ratio: Number(longContext?.input_ratio) || 1,
+    output_ratio: Number(longContext?.output_ratio) || 1
+  };
 };
 
 const EditModal = ({
@@ -122,40 +188,15 @@ const EditModal = ({
   const [inputs, setInputs] = useState(singleMode ? singleOriginInputs : multipleOriginInputs);
   const [selectModel, setSelectModel] = useState([]);
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
   const [unitType, setUnitType] = useState('rate');
   const [localUnit, setLocalUnit] = useState(unit);
 
-  // 当外部unit变化时同步本地unit
-  useEffect(() => {
-    setLocalUnit(unit);
-  }, [unit]);
-
   const calculateRate = useCallback(
-    (price) => {
-      if (price === '') {
-        return 0;
-      }
-      if (unitType === 'rate') {
-        return price;
-      }
-
-      let priceValue = new Decimal(price);
-
-      if (localUnit === 'M') {
-        priceValue = priceValue.div(1000);
-      }
-
-      switch (unitType) {
-        case 'USD':
-          priceValue = priceValue.div(0.002);
-          break;
-        case 'RMB':
-          priceValue = priceValue.div(0.014);
-          break;
-      }
-
-      return Number(priceValue.toFixed(4));
+    (price, priceType) => {
+      if (price === '') return 0;
+      return valueToRate(price, unitType, localUnit, priceType);
     },
     [unitType, localUnit]
   );
@@ -177,7 +218,7 @@ const EditModal = ({
   ];
 
   const handleEndAdornment = useCallback(
-    (value) => {
+    (value, priceType) => {
       let endAdornment = '';
 
       switch (unitType) {
@@ -186,7 +227,7 @@ const EditModal = ({
           break;
         case 'USD':
         case 'RMB':
-          endAdornment = value === 0 ? 'Free' : calculateRate(value) + ' Rate';
+          endAdornment = value === 0 ? 'Free' : calculateRate(value, priceType) + ' Rate';
           break;
       }
 
@@ -195,16 +236,20 @@ const EditModal = ({
     [unitType, calculateRate]
   );
 
-  const handleStartAdornment = useCallback(() => {
-    switch (unitType) {
-      case 'rate':
-        return 'Rate：';
-      case 'USD':
-        return `USD(${localUnit})：`;
-      case 'RMB':
-        return `RMB(${localUnit})：`;
-    }
-  }, [unitType, localUnit]);
+  const handleStartAdornment = useCallback(
+    (priceType) => {
+      const unitSuffix = priceType === 'times' ? '' : `(${localUnit})`;
+      switch (unitType) {
+        case 'rate':
+          return 'Rate：';
+        case 'USD':
+          return `USD${unitSuffix}：`;
+        case 'RMB':
+          return `RMB${unitSuffix}：`;
+      }
+    },
+    [unitType, localUnit]
+  );
 
   // 表单提交处理
   const submit = async (values, { setErrors, setStatus, setSubmitting }) => {
@@ -216,16 +261,21 @@ const EditModal = ({
       const validationError = validateSingleMode(t, values, rows);
       if (validationError) {
         setStatus({ success: false });
+        showError(validationError);
         setErrors({ submit: validationError });
+        setSubmitting(false);
         return;
       }
 
       try {
         if (onSaveSingle) {
+          const calculatedInput = calculateRate(values.input, values.type);
+          const calculatedOutput = values.type === 'times' ? calculatedInput : calculateRate(values.output, values.type);
           await onSaveSingle({
             ...values,
-            input: calculateRate(values.input),
-            output: calculateRate(values.output)
+            input: calculatedInput,
+            output: calculatedOutput,
+            long_context: normalizeLongContext(values.long_context)
           });
         }
         setSubmitting(false);
@@ -233,6 +283,7 @@ const EditModal = ({
       } catch (error) {
         setStatus({ success: false });
         setErrors({ submit: error.message });
+        setSubmitting(false);
         return;
       }
     }
@@ -240,6 +291,8 @@ const EditModal = ({
     // 多选模式处理
     values.models = trims(values.models);
     try {
+      const calculatedInput = calculateRate(values.input, values.type);
+      const calculatedOutput = values.type === 'times' ? calculatedInput : calculateRate(values.output, values.type);
       const res = await API.post(`/api/prices/multiple`, {
         original_models: inputs.models,
         models: values.models,
@@ -247,10 +300,11 @@ const EditModal = ({
           model: 'batch',
           type: values.type,
           channel_type: values.channel_type,
-          input: calculateRate(values.input),
-          output: calculateRate(values.output),
+          input: calculatedInput,
+          output: calculatedOutput,
           locked: values.locked,
-          extra_ratios: values.extra_ratios
+          extra_ratios: values.extra_ratios,
+          long_context: normalizeLongContext(values.long_context)
         }
       });
       const { success, message } = res.data;
@@ -307,13 +361,24 @@ const EditModal = ({
     }));
   };
 
+  // 处理long_context变化 (单模式用)
+  const handleChangeLongContext = (newLongContext) => {
+    if (!singleMode) return; // 单一模式专用
+
+    setInputs((prev) => ({
+      ...prev,
+      long_context: newLongContext
+    }));
+  };
+
   useEffect(() => {
     if (singleMode) {
       // 单一模式初始化表单
       if (price) {
         setInputs({
           ...price,
-          extra_ratios: price.extra_ratios || {}
+          extra_ratios: price.extra_ratios || {},
+          long_context: price.long_context || {}
         });
       } else {
         setInputs(singleOriginInputs);
@@ -331,10 +396,22 @@ const EditModal = ({
     }
   }, [singleMode, price, pricesItem, noPriceModel]);
 
+  // 打开时按"新建/编辑"分别初始化默认 tab：
+  // - 新建模型：USD / M（最常见的运营场景）
+  // - 编辑已存：rate / 跟随外部 unit prop，让用户看到 DB 真实倍率
+  // 只对 open 上升沿响应，其它 props 通过 ref 取最新值，避免父组件 re-render 让 prop 引用变化时覆盖用户已经切过的 unitType/localUnit
+  const initRef = useRef({ singleMode, price, pricesItem, unit });
+  initRef.current = { singleMode, price, pricesItem, unit };
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    const { singleMode: sm, price: p, pricesItem: pi, unit: u } = initRef.current;
+    const isCreate = sm ? !p : !pi;
+    if (isCreate) {
+      setUnitType('USD');
+      setLocalUnit('M');
+    } else {
       setUnitType('rate');
-      setLocalUnit('K');
+      setLocalUnit(u);
     }
   }, [open]);
 
@@ -421,29 +498,52 @@ const EditModal = ({
   };
 
   // 渲染单位类型切换按钮组
-  const renderUnitTypeToggle = () => (
-    <FormControl fullWidth sx={{ ...theme.typography.otherInput }}>
-      <Stack direction="row" spacing={2}>
-        <ToggleButtonGroup
-          value={unitType}
-          onChange={(event, newUnitType) => {
-            setUnitType(newUnitType);
-          }}
-          options={unitTypeOptions}
-          aria-label="unit toggle"
-        />
+  const renderUnitTypeToggle = (formProps) => {
+    const currentType = singleMode ? inputs.type : formProps?.values?.type;
+    const isTimes = currentType === 'times';
 
-        <ToggleButtonGroup
-          value={localUnit}
-          onChange={(event, newUnit) => {
-            setLocalUnit(newUnit);
-          }}
-          options={unitOptions}
-          aria-label="unit toggle"
-        />
-      </Stack>
-    </FormControl>
-  );
+    // 切换 unitType / localUnit 时把当前 input/output 反向换算到新单位，
+    // 否则原来语义"1.5 rate"会被误解为"1.5 USD/K"，submit 时 calculateRate 会把它当 USD 反算成 750 rate 写入 DB
+    const reconvertFields = (fromType, fromUnit, toType, toUnit) => {
+      if (fromType === toType && fromUnit === toUnit) return;
+      const curInput = singleMode ? inputs.input : formProps?.values?.input ?? 0;
+      const curOutput = singleMode ? inputs.output : formProps?.values?.output ?? 0;
+      const newInput = convertUnit(curInput, fromType, fromUnit, toType, toUnit, currentType);
+      const newOutput = convertUnit(curOutput, fromType, fromUnit, toType, toUnit, currentType);
+      if (singleMode) {
+        setInputs((prev) => ({ ...prev, input: newInput, output: newOutput }));
+      } else if (formProps?.setFieldValue) {
+        formProps.setFieldValue('input', newInput);
+        formProps.setFieldValue('output', newOutput);
+      }
+    };
+
+    const handleUnitTypeChange = (_event, newUnitType) => {
+      if (!newUnitType || newUnitType === unitType) return;
+      reconvertFields(unitType, localUnit, newUnitType, localUnit);
+      setUnitType(newUnitType);
+    };
+
+    const handleLocalUnitChange = (_event, newLocalUnit) => {
+      if (!newLocalUnit || newLocalUnit === localUnit) return;
+      // rate 模式下 K/M 不影响数值，只需切 state
+      if (unitType !== 'rate') {
+        reconvertFields(unitType, localUnit, unitType, newLocalUnit);
+      }
+      setLocalUnit(newLocalUnit);
+    };
+
+    return (
+      <FormControl fullWidth sx={{ ...theme.typography.otherInput }}>
+        <Stack direction="row" spacing={2}>
+          <ToggleButtonGroup value={unitType} onChange={handleUnitTypeChange} options={unitTypeOptions} aria-label="unit toggle" />
+          {!isTimes && (
+            <ToggleButtonGroup value={localUnit} onChange={handleLocalUnitChange} options={unitOptions} aria-label="unit toggle" />
+          )}
+        </Stack>
+      </FormControl>
+    );
+  };
 
   // 渲染输入价格表单
   const renderInputField = (formProps) => {
@@ -454,17 +554,21 @@ const EditModal = ({
     const onChange = singleMode ? handleChange : formikHandleChange;
     const errorState = singleMode ? !!errors.input : Boolean(touched?.input && errors?.input);
 
+    // 根据类型决定 label
+    const currentType = singleMode ? inputs.type : values?.type;
+    const inputLabel = currentType === 'times' ? t('modelpricePage.timesPrice') : t('modelpricePage.inputMultiplier');
+
     return (
       <FormControl fullWidth error={errorState} sx={{ ...theme.typography.otherInput }}>
-        <InputLabel htmlFor="channel-input-label">{t('modelpricePage.inputMultiplier')}</InputLabel>
+        <InputLabel htmlFor="channel-input-label">{inputLabel}</InputLabel>
         <OutlinedInput
           id="channel-input-label"
-          label={t('modelpricePage.inputMultiplier')}
+          label={inputLabel}
           type="number"
           value={value}
           name="input"
-          startAdornment={<InputAdornment position="start">{handleStartAdornment()}</InputAdornment>}
-          endAdornment={<InputAdornment position="end">{handleEndAdornment(value)}</InputAdornment>}
+          startAdornment={<InputAdornment position="start">{handleStartAdornment(currentType)}</InputAdornment>}
+          endAdornment={<InputAdornment position="end">{handleEndAdornment(value, currentType)}</InputAdornment>}
           onBlur={handleBlur}
           onChange={onChange}
           aria-describedby="helper-text-channel-input-label"
@@ -487,6 +591,7 @@ const EditModal = ({
     const value = singleMode ? inputs.output : values.output;
     const onChange = singleMode ? handleChange : formikHandleChange;
     const errorState = singleMode ? !!errors.output : Boolean(touched?.output && errors?.output);
+    const currentType = singleMode ? inputs.type : values?.type;
 
     return (
       <FormControl fullWidth error={errorState} sx={{ ...theme.typography.otherInput }}>
@@ -497,8 +602,8 @@ const EditModal = ({
           type="number"
           value={value}
           name="output"
-          startAdornment={<InputAdornment position="start">{handleStartAdornment()}</InputAdornment>}
-          endAdornment={<InputAdornment position="end">{handleEndAdornment(value)}</InputAdornment>}
+          startAdornment={<InputAdornment position="start">{handleStartAdornment(currentType)}</InputAdornment>}
+          endAdornment={<InputAdornment position="end">{handleEndAdornment(value, currentType)}</InputAdornment>}
           onBlur={handleBlur}
           onChange={onChange}
           aria-describedby="helper-text-channel-output-label"
@@ -577,6 +682,30 @@ const EditModal = ({
     );
   };
 
+  // 渲染长上下文分档选择器
+  const renderLongContextSelector = (formProps) => {
+    const { setFieldValue, values = {} } = formProps || {};
+
+    if (singleMode) {
+      return (
+        <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+          <LongContextSelector value={inputs.long_context} onChange={handleChangeLongContext} />
+        </Paper>
+      );
+    }
+
+    return (
+      <FormControl fullWidth sx={{ ...theme.typography.otherInput }}>
+        <LongContextSelector
+          value={values.long_context || {}}
+          onChange={(newLongContext) => {
+            setFieldValue('long_context', newLongContext);
+          }}
+        />
+      </FormControl>
+    );
+  };
+
   // 渲染模型选择器 (多模式特有)
   const renderModelSelector = (formProps) => {
     if (!formProps) return null;
@@ -640,11 +769,13 @@ const EditModal = ({
         <Button onClick={onCancel}>{t('common.cancel')}</Button>
         {singleMode ? (
           <Button
+            disableElevation
+            disabled={submitting}
             onClick={() =>
               submit(inputs, {
                 setErrors,
                 setStatus: () => {},
-                setSubmitting: () => {}
+                setSubmitting
               })
             }
             variant="contained"
@@ -687,13 +818,15 @@ const EditModal = ({
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               {renderInputField()}
-              {renderOutputField()}
+              {inputs.type === 'tokens' && renderOutputField()}
             </Stack>
 
             {renderLockedToggle()}
             <Alert severity="warning">{t('pricing_edit.lockedTip')}</Alert>
 
             {renderExtraRatioSelector()}
+
+            {inputs.type === 'tokens' && renderLongContextSelector()}
 
             {errors.general && (
               <Typography color="error" variant="body2">
@@ -710,13 +843,16 @@ const EditModal = ({
               <form noValidate onSubmit={formProps.handleSubmit}>
                 {renderTypeSelector(formProps)}
                 {renderChannelTypeSelector(formProps)}
-                {renderUnitTypeToggle()}
-                {renderInputField(formProps)}
-                {renderOutputField(formProps)}
+                {renderUnitTypeToggle(formProps)}
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  {renderInputField(formProps)}
+                  {formProps.values.type === 'tokens' && renderOutputField(formProps)}
+                </Stack>
                 {renderModelSelector(formProps)}
                 {renderLockedToggle(formProps)}
                 <Alert severity="warning">{t('pricing_edit.lockedTip')}</Alert>
                 {renderExtraRatioSelector(formProps)}
+                {formProps.values.type === 'tokens' && renderLongContextSelector(formProps)}
                 {renderActions(formProps)}
               </form>
             )}

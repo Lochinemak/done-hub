@@ -61,6 +61,32 @@ type ChatCompletionMessage struct {
 	CacheControl     any                              `json:"cache_control,omitempty"`
 }
 
+// GetReasoningContent 返回推理内容：reasoning_content 与 reasoning 二选一（前者优先）。
+// 二者互斥，相加会在个别网关同时回填两字段时重复计费。
+func (m ChatCompletionMessage) GetReasoningContent() string {
+	if m.ReasoningContent != "" {
+		return m.ReasoningContent
+	}
+	return m.Reasoning
+}
+
+// toolCallsText 返回模型生成的 tool call 文本（name+arguments）。
+// OpenAI 计费口径：模型生成的 tool call name/arguments 属 output token，兜底估算须计入。
+func toolCallsText(toolCalls []*ChatCompletionToolCalls) (text string) {
+	for _, toolCall := range toolCalls {
+		if toolCall == nil || toolCall.Function == nil {
+			continue
+		}
+		text += toolCall.Function.Name + toolCall.Function.Arguments
+	}
+	return
+}
+
+// GetToolCallsText 返回模型生成的 tool call 文本（name+arguments）。
+func (m ChatCompletionMessage) GetToolCallsText() string {
+	return toolCallsText(m.ToolCalls)
+}
+
 func (m ChatCompletionMessage) StringContent() string {
 	content, ok := m.Content.(string)
 	if ok {
@@ -354,9 +380,13 @@ type ChatCompletionResponse struct {
 }
 
 func (cc *ChatCompletionResponse) GetContent() string {
+	// 兼容推理模型：非流式响应输出可能落在 reasoning_content/reasoning 而非 content。
+	// 仅用于 completion token 兜底估算（billing），reasoning 与 tool_calls 均为计费的 output token。
 	var content string
 	for _, choice := range cc.Choices {
 		content += choice.Message.StringContent()
+		content += choice.Message.GetReasoningContent()
+		content += choice.Message.GetToolCallsText()
 	}
 	return content
 }
@@ -433,6 +463,7 @@ func (f *ChatCompletionToolCallsFunction) Split(c *ChatCompletionStreamChoice, s
 type ChatCompletionStreamChoiceDelta struct {
 	Content          string                           `json:"content,omitempty"`
 	Role             string                           `json:"role,omitempty"`
+	Audio            any                              `json:"audio,omitempty"`
 	FunctionCall     *ChatCompletionToolCallsFunction `json:"function_call,omitempty"`
 	ToolCalls        []*ChatCompletionToolCalls       `json:"tool_calls,omitempty"`
 	ReasoningContent string                           `json:"reasoning_content,omitempty"`
@@ -440,6 +471,20 @@ type ChatCompletionStreamChoiceDelta struct {
 	Image            []MultimediaData                 `json:"image,omitempty"`
 	Annotations      any                              `json:"annotations,omitempty"`
 	Images           []ChatMessagePart                `json:"images,omitempty"`
+}
+
+// GetReasoningContent 返回推理增量：reasoning_content 与 reasoning 二选一（前者优先）。
+// 二者互斥，相加会在个别网关同时回填两字段时重复计费。
+func (m *ChatCompletionStreamChoiceDelta) GetReasoningContent() string {
+	if m.ReasoningContent != "" {
+		return m.ReasoningContent
+	}
+	return m.Reasoning
+}
+
+// GetToolCallsText 返回模型生成的 tool call 增量文本（name+arguments）。
+func (m *ChatCompletionStreamChoiceDelta) GetToolCallsText() string {
+	return toolCallsText(m.ToolCalls)
 }
 
 func (m *ChatCompletionStreamChoiceDelta) ToolToFuncCalls() {
@@ -482,8 +527,12 @@ type ChatCompletionStreamResponse struct {
 }
 
 func (c *ChatCompletionStreamResponse) GetResponseText() (responseText string) {
+	// 兼容推理模型：输出可能落在 reasoning_content/reasoning 而非 content。
+	// 仅用于流中断时的 completion token 兜底估算，reasoning 与 tool_calls 均为计费的 output token。
 	for _, choice := range c.Choices {
 		responseText += choice.Delta.Content
+		responseText += choice.Delta.GetReasoningContent()
+		responseText += choice.Delta.GetToolCallsText()
 	}
 
 	return
@@ -594,7 +643,7 @@ func (c *ChatCompletionRequest) ToResponsesRequest() *OpenAIResponsesRequest {
 					Type:      InputTypeFunctionCall,
 					CallID:    tool.Id,
 					Name:      tool.Function.Name,
-					Arguments: tool.Function.Arguments,
+					Arguments: ArgumentsFromString(tool.Function.Arguments),
 				})
 			}
 
@@ -652,4 +701,35 @@ func (c *ChatCompletionRequest) ToResponsesRequest() *OpenAIResponsesRequest {
 	}
 
 	return res
+}
+
+// ToImageRequest 把 chat completions 请求降级成 image generations 请求。
+// 仅在客户端把图像生成模型当 chat 模型用时调用——这种用法本身偏离 OpenAI 协议，
+// 我们按 messages 最后一条非空 user message 的文本作 prompt，丢弃 system/tool/multi-part 等
+// chat 协议独有的语义。
+//
+// 回退到上一条 user message：覆盖多轮 chat 客户端把最后一条 user 消息作占位（empty content）
+// 推 turn 流转的常见模式；若上游协议希望"空 prompt 直接 400"，此处会改在 compatibleSendImage
+// 入口判 Prompt=="" 返回 invalid_request_error。
+//
+// 不设 Model：调用方负责用映射后模型名喂上游，让本函数只承担"chat → image 协议形态转换"。
+// N 硬编码 1：chat 的 n（completions 数）与 image 的 n（图像数）语义不同，从 chat 入口走降级
+// 路径的客户端也无法表达"要多张图"，强制 1 是最安全的默认。
+func (c *ChatCompletionRequest) ToImageRequest() *ImageRequest {
+	req := &ImageRequest{
+		N:    1,
+		User: c.User,
+	}
+
+	for i := len(c.Messages) - 1; i >= 0; i-- {
+		if c.Messages[i].Role != ChatMessageRoleUser {
+			continue
+		}
+		req.Prompt = c.Messages[i].StringContent()
+		if req.Prompt != "" {
+			break
+		}
+	}
+
+	return req
 }

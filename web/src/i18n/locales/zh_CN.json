@@ -39,7 +39,15 @@
   "theme": {
     "auto": "跟随系统",
     "light": "浅色模式",
-    "dark": "深色模式"
+    "dark": "深色模式",
+    "color": "主题色",
+    "colors": {
+      "default": "默认",
+      "blue": "蓝色",
+      "cyan": "青色",
+      "purple": "紫色",
+      "red": "红色"
+    }
   },
   "task": "异步任务",
   "operation": "运营",
@@ -56,7 +64,9 @@
     "console": "控制台",
     "error": "错误",
     "unknownVersion": "未知版本",
-    "welcomeBack": "欢迎回来"
+    "welcomeBack": "欢迎回来",
+    "userAgreement": "用户协议",
+    "privacyPolicy": "隐私政策"
   },
   "sidebar": {
     "totalQuota": "总额度",
@@ -77,7 +87,17 @@
     "verificationInfo": "请稍后几秒重试，Turnstile 正在检查用户环境！",
     "restSendEmail": "重置邮件发送成功，请检查邮箱！",
     "registering": "注册中...",
-    "inviteCodeRequired": "邀请码是必填项"
+    "inviteCodeRequired": "邀请码是必填项",
+    "agreementRequired": "请先阅读并勾选同意相关协议",
+    "agreementPrefix": "我已阅读并同意",
+    "userAgreement": "用户协议",
+    "privacyPolicy": "隐私政策",
+    "agreementAnd": "和"
+  },
+  "legalConsentDialog": {
+    "title": "协议更新",
+    "description": "相关协议已更新，请阅读并同意后继续使用。",
+    "button": "同意并继续"
   },
   "registerPage": {
     "alreadyHaveAccount": "已经有帐号了?点击登录"
@@ -117,13 +137,14 @@
     "RPM": "当前RPM",
     "TPM": "当前TPM",
     "availability": "可用率",
-    "status_normal": "正常",
-    "status_abnormal": "异常"
+    "week_total_consumption": "本周总消费"
   },
   "analytics_index": {
     "startTime": "开始时间",
     "endTime": "结束时间",
     "consumptionStatistics": "消费统计",
+    "costStatistics": "成本统计",
+    "profitStatistics": "利润统计",
     "tokensStatistics": "Tokens统计",
     "averageLatency": "平均延迟",
     "requestsCount": "请求数",
@@ -131,6 +152,9 @@
     "registrationStatistics": "注册统计",
     "totalUserSpending": "用户总消费金额",
     "totalUserBalance": "用户总余额",
+    "totalUsedQuota": "总消耗",
+    "totalRequestCount": "请求总次数",
+    "totalTokens": "请求总Token",
     "totalUsers": "用户总数",
     "directRegistration": "直接注册",
     "invitationRegistration": "邀请注册",
@@ -147,7 +171,9 @@
     "realTimeTraffic": "实时流量",
     "tpmDescription": "TPM",
     "cpmDescription": "CPM",
+    "ppmDescription": "PPM",
     "last60SecondsStats": "最近60秒统计",
+    "autoRefresh": "自动",
     "timeFilter": {
       "all": "全部",
       "year": "本年",
@@ -181,6 +207,7 @@
     "usedBalance": "已使用/余额",
     "priority": "优先级",
     "weight": "权重",
+    "costRatio": "成本倍率",
     "actions": "操作",
     "supplier": "供应商",
     "model": "模型",
@@ -196,6 +223,8 @@
     "speedTestDisabled": "测速禁用",
     "filterTags": "过滤标签",
     "onlyTags": "仅显示标签",
+    "tagFilter": "标签筛选",
+    "noTagOnly": "仅未分组",
     "batchAzureAPISuccess": "成功更新 {{count}} 条数据",
     "inputAPIVersion": "请输入api版本号",
     "selectAll": "全选",
@@ -232,19 +261,51 @@
     "selectModelToAdd": "选择或输入要添加的模型",
     "pleaseSelectModel": "请选择或输入模型",
     "pleaseSelectChannelsForModel": "请选择至少一个渠道",
-    "channelAlreadyHasModel": "（已有部分模型）",
+    "channelAlreadyHasAllModels": "（已有全部所选模型）",
     "currentModels": "当前模型",
     "noModels": "无",
     "addingModel": "添加中...",
     "addModelToChannels": "为 {{count}} 个渠道添加模型",
     "batchAddModelSuccess": "成功为 {{count}} 个渠道添加模型 \"{{model}}\"",
     "modelInputTip": "支持输入多个模型，用逗号分隔",
-    "loadingChannels": "正在加载渠道列表..."
+    "loadingChannels": "正在加载渠道列表...",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "pageInfo": "第 {{page}} / {{total}} 页",
+    "selectionStatus": "已选 {{selected}}（本页 {{onPage}}）/ 本页 {{count}} 条 / 共匹配 {{total}} 条",
+    "selectionStatusFiltered": "已选 {{selected}}（本页 {{onPage}}）/ 本页严格匹配 {{count}} 条 / 服务器粗筛 {{total}} 条",
+    "selectCurrentPage": "全选本页",
+    "unselectCurrentPage": "取消本页",
+    "clearSelection": "清空选中",
+    "clearKeyword": "清除关键字",
+    "channelOnlyHasThisModel": "（仅剩此模型，无法删除）",
+    "channelAlreadyHasPartialModels": "（部分模型已存在）",
+    "batchDeleteTipV2": "搜索时使用模糊匹配，列表中已按完整模型名严格筛选。若渠道只剩此一个模型则不可删除，避免清空。",
+    "batchAzureAPITip": "选择 Azure 类型的渠道并替换 API 版本号。先输入当前版本号进行搜索（留空则查询全部 Azure 渠道），再输入新版本号执行替换。",
+    "currentAzureAPIVersion": "当前版本",
+    "newAzureAPIVersion": "新版本",
+    "replaceAzureAPIVersion": "替换 {{count}} 个渠道的 API 版本",
+    "replacing": "替换中...",
+    "confirmDeleteModel": "从 {{count}} 个渠道中删除模型 \"{{model}}\"",
+    "deleting": "删除中...",
+    "modelToDelete": "要删除的模型名（完整匹配）",
+    "delModelEmptyHint": "请在上方输入要删除的模型名后按 Enter 搜索匹配渠道",
+    "azureApiSearchPlaceholder": "输入要查找的 API 版本（留空查询全部 Azure 渠道）",
+    "showAll": "显示全部"
   },
   "channel_edit": {
     "customModelTip": "自定义：点击或回车输入",
     "modelListError": "获取模型列表失败",
     "editSuccess": "更新成功!",
+    "tagGroupOverwriteWarning": "此标签下共 {{count}} 个渠道，保存后将以相同配置覆盖全部 {{count}} 个渠道（各自的 Key 除外）。",
+    "tagGroupSaveConfirmTitle": "确认覆盖分组配置",
+    "tagGroupSaveConfirmContent": "保存后将以当前配置覆盖标签「{{tag}}」下全部 {{count}} 个渠道（各自的 Key 除外）。确定继续吗？",
+    "tagBulkFieldConfirmTitle": "确认批量修改",
+    "tagBulkFieldConfirmContent": "此操作会将标签「{{tag}}」下全部 {{count}} 个渠道的「{{field}}」统一设为 {{value}}。确定继续吗？",
+    "tagMemberSectionTitle": "组成员（每个 Key 对应一个渠道）",
+    "tagMemberKeysLabel": "成员 Key 列表",
+    "tagMemberKeysHelper": "每行一个 Key，对应组内一个渠道；新增行将创建渠道，删除行将移除对应渠道。各渠道的 Key 不会被共享配置覆盖。",
+    "joinExistingTagWarning": "标签「{{tag}}」已存在（{{count}} 个渠道）。保存后此渠道将加入该分组，之后对该分组的统一编辑会覆盖其配置。",
     "addSuccess": "创建成功！",
     "batchAdd": "批量添加",
     "isEnable": "是否启用",
@@ -270,6 +331,9 @@
     "addModelHeader": "添加自定义Header",
     "collapse": "收起",
     "expand": "展开",
+    "sectionBasic": "基础配置",
+    "sectionAdvanced": "高级设置",
+    "sectionBilling": "计费与行为",
     "copyModels": "复制模型",
     "mapAdd": "添加{{name}}",
     "mapAddByJson": "通过JSON添加{{name}}",
@@ -283,7 +347,9 @@
     "openaiBaseUrlTip": "请输入OpenAI格式的API地址，例如：https://api.openai.com",
     "fetchModels": "获取模型",
     "selectAll": "全选",
+    "selectAllTooltip": "选择全部模型",
     "invertSelection": "反选",
+    "invertSelectionTooltip": "反转当前选择",
     "noModels": "没有模型",
     "noMatchingModels": "没有匹配的模型",
     "selectedCount": "已选{{count}}个模型",
@@ -311,7 +377,10 @@
     "overwriteMappings": "覆盖原有映射关系",
     "overwriteMappingsTip": "启用后将清空原有的映射关系，仅保留此次创建的映射",
     "clearModels": "重置",
-    "clearModelsTip": "重置所有已选择的模型"
+    "clearModelsTip": "重置所有已选择的模型",
+    "clearSearch": "清除",
+    "tagMembersTitle": "组内共 {{count}} 个成员渠道",
+    "tagMembersHint": "各成员的 Key 相互独立、不受共享配置影响；如需增删成员，请在列表中展开该标签行逐个管理。"
   },
   "token_index": {
     "token": "令牌",
@@ -363,7 +432,34 @@
     "limits_ip_whitelist_info": "限制令牌只能从特定IP地址或范围访问",
     "limits_ip_whitelist_switch": "启用IP白名单",
     "limits_ip_whitelist_input": "IP地址",
-    "limits_ip_whitelist_helper": "每行输入一个IP地址或CIDR范围（如：192.168.1.1 或 10.0.0.0/8）"
+    "limits_ip_whitelist_helper": "每行输入一个IP地址或CIDR范围（如：192.168.1.1 或 10.0.0.0/8）",
+    "billingTag": "费用标签",
+    "billingTagInfo": "不参与实际运算，仅是一个标签，可用于按照分组统计费用（例如企业内部部门成本统计），仅可信用户和管理员可见并设置",
+    "billingTagLabel": "费用标签",
+    "billingTagHelper": "选择一个分组作为费用标签，用于按分组统计该令牌的费用",
+    "adminSearch": "管理员搜索",
+    "adminSearchDesc": "按用户ID或令牌Key搜索所有用户的令牌",
+    "userId": "用户ID",
+    "userIdPlaceholder": "输入用户ID",
+    "tokenId": "令牌ID",
+    "tokenIdPlaceholder": "输入令牌ID",
+    "tokenKeySearch": "令牌Key",
+    "tokenKeySearchPlaceholder": "输入令牌Key（支持前缀，可含 sk-）",
+    "search": "查询",
+    "clearSearch": "清除",
+    "owner": "所属",
+    "adminEditWarning": "您正在以管理员身份编辑此令牌，可以修改令牌所属用户",
+    "transferToUser": "所属用户ID",
+    "transferToUserHelper": "修改用户ID可转移此令牌的所有权",
+    "accessedTime": "最近使用",
+    "tokenKey": "密钥",
+    "createdSuccessTitle": "令牌创建成功",
+    "createdSuccessTip": "请妥善保存此令牌，请勿泄露给他人。",
+    "done": "完成",
+    "showKey": "显示密钥",
+    "hideKey": "隐藏密钥",
+    "apiRate": "API速率",
+    "apiRateTip": "每分钟允许的请求数，当速率小于60时，使用计数器限制器，当速率大于等于60时，使用令牌桶限制器，仅在启用Redis时有效"
   },
   "invoice_index": {
     "invoice": "月度账单",
@@ -397,7 +493,8 @@
     "userinfo": "用户信息",
     "usage_statistics": "使用统计",
     "download": "下载PDF",
-    "usage_details": "账单详情"
+    "usage_details": "账单详情",
+    "summary": "摘要"
   },
   "logPage": {
     "title": "日志",
@@ -408,6 +505,7 @@
     "exporting": "导出中...",
     "exportSuccess": "导出成功",
     "exportError": "导出失败",
+    "totalCost": "总消费",
     "columnSettings": "列设置",
     "selectColumns": "选择列",
     "columnSelectAll": "全选",
@@ -431,13 +529,18 @@
     "outputAudioTokens": "输出音频Tokens (* {{ ratio }})",
     "cachedTokens": "缓存Tokens (* {{ ratio }})",
     "cachedWriteTokens": "缓存写入Tokens (* {{ ratio }})",
+    "cachedWrite1hTokens": "缓存写入Tokens(1h) (* {{ ratio }})",
     "cachedReadTokens": "缓存读取Tokens (* {{ ratio }})",
+    "openaiCacheWriteTokens": "缓存写入Tokens(OpenAI) (* {{ ratio }})",
     "reasoningTokens": "推理Tokens (* {{ ratio }})",
     "inputImageTokens": "输入图像Tokens (* {{ ratio }})",
     "outputImageTokens": "输出图像Tokens (* {{ ratio }})",
     "totalInputTokens": "计算输入Tokens",
     "totalOutputTokens": "计算输出Tokens",
     "sourceIp": "来源IP",
+    "requestId": "请求ID",
+    "upstreamRequestId": "上游请求ID",
+    "requestIdentifier": "请求标识",
     "logType": {
       "all": "全部",
       "recharge": "充值",
@@ -467,15 +570,19 @@
       "outputPrice": "原输出价格",
       "groupRatio": "分组倍率",
       "groupRatioValue": "分组倍率",
+      "longContextRatio": "长上下文倍率",
       "actualPrice": "实际价格",
       "input": "实际输入价格",
       "output": "实际输出价格",
       "finalCalculation": "最终计算",
       "originalBilling": "原始计费",
       "actualBilling": "实际计费",
+      "cost": "成本",
+      "profit": "利润",
       "calculationNote": "PS：本系统按照积分计算，所有金额均为积分换算而来，1积分=$0.000002，最低消费为1积分，本计算步骤仅供参考，以实际扣费为准",
       "times": "倍"
-    }
+    },
+    "unknown": "未知"
   },
   "redemptionPage": {
     "pageTitle": "兑换",
@@ -547,7 +654,9 @@
     "taskId": "任务ID",
     "taskIdPlaceholder": "任务ID",
     "username": "用户名称",
-    "sourceIp": "来源IP"
+    "sourceIp": "来源IP",
+    "requestId": "请求ID",
+    "upstreamRequestId": "上游请求ID"
   },
   "midjourneyPage": {
     "midjourney": "Midjourney",
@@ -588,6 +697,9 @@
     "operationSuccess": "操作成功完成！",
     "id": "ID",
     "statistics": "统计信息",
+    "remainingShort": "剩余",
+    "usedShort": "已用",
+    "requestCountShort": "调用",
     "userRole": "用户角色",
     "bind": "绑定",
     "creationTime": "创建时间",
@@ -596,17 +708,20 @@
     "status": "状态",
     "action": "操作",
     "useQuota": "请求次数",
+    "setCommonUser": "设为普通用户",
     "setAdmin": "设为管理员",
     "cancelAdmin": "取消管理员",
     "del": "删除用户",
     "delTip": "是否删除用户",
     "cUserRole": "普通用户",
+    "reliableUserRole": "可信内部员工",
     "adminUserRole": "管理员",
     "superAdminRole": "超级管理员",
     "uUserRole": "未知身份",
+    "setReliable": "设为可信内部员工",
     "changeQuota": "增减额度",
-    "changeQuotaHelperText": "这里是增减，不是直接更改用户余额，输入美元，你最多可以减扣 {{quota}}",
-    "changeQuotaNotEmpty": "请填写变更额度",
+    "changeQuotaHelperText": "这里是增减，不是直接更改用户余额，最多可减扣 {{tokens}} tokens (≈ {{money}})",
+    "changeQuotaNotEmpty": "变更额度不能为 0",
     "changeQuotaNotEnough": "不能扣除超过用户余额的额度",
     "quotaRemark": "备注"
   },
@@ -628,6 +743,10 @@
     "inputUsernamePlaceholder": "请输入用户名",
     "inputPasswordPlaceholder": "请输入密码",
     "inputDisplayNamePlaceholder": "请输入显示名称",
+    "quotaRemindEnabled": "接收额度提醒邮件",
+    "quotaRemindThreshold": "额度提醒阈值",
+    "quotaRemindThresholdPlaceholder": "剩余额度低于此值时邮件提醒，填 0 表示仅在额度用尽时提醒",
+    "quotaRemindThresholdDefault": "留空使用系统默认：{{default}}",
     "submit": "提交",
     "accountBinding": "账号绑定",
     "bindWechatAccount": "绑定微信账号",
@@ -680,8 +799,9 @@
     "currencyInfo5": "例如",
     "currencyInfo6": "：gpt-4 输入： $0.03 / 1K tokens 完成：$0.06 / 1K tokens",
     "currencyInfo7": "0.03 / 0.002 = 15, 0.06 / 0.002 = 30，即输入倍率为 15，完成倍率为 30",
-    "noPriceModelWarning": "存在未配置价格的模型，请及时配置价格：",
-    "errPricesWarning": "存在供应商类型错误的模型，请及时配置：",
+    "noPriceModelWarning": "存在未配置价格的模型，请及时配置价格",
+    "errPricesWarning": "存在供应商类型错误的模型，请及时配置",
+    "modelCountLabel": "共 {{count}} 个",
     "newButton": "新建",
     "refreshButton": "刷新",
     "updatePricesButton": "更新价格",
@@ -703,6 +823,7 @@
     "outputPrice": "输出价格",
     "inputMultiplier": "输入价格",
     "outputMultiplier": "输出价格",
+    "timesPrice": "单次价格",
     "input": "输入",
     "output": "输出",
     "rate": "倍率",
@@ -719,7 +840,9 @@
     "output_audio_tokens": "音频输出倍率",
     "cached_tokens": "缓存倍率",
     "cached_write_tokens": "缓存写入倍率",
+    "cached_write_1h_tokens": "缓存写入(1h)倍率",
     "cached_read_tokens": "缓存读取倍率",
+    "openai_cache_write_tokens": "OpenAI缓存写入倍率",
     "reasoning_tokens": "推理倍率",
     "input_text_tokens": "输入文本倍率",
     "output_text_tokens": "输出文本倍率",
@@ -741,6 +864,10 @@
     "priceDetails": "价格明细",
     "priceNote": "不同分组,对应的价格也随之不同,渠道组需要在令牌管理中切换。",
     "otherInfo": "其他信息",
+    "longContext": "长上下文计费",
+    "shortContext": "短上下文",
+    "longContextLabel": "长上下文",
+    "longContextDesc": "输入超过 {{threshold}} tokens 时，整次请求按长上下文价格计费。",
     "totalModels": "共 {{count}} 个模型",
     "noModelsFound": "未找到匹配的模型",
     "noModelsFoundTip": "请尝试调整筛选条件或搜索关键词",
@@ -835,9 +962,29 @@
           "label": "重试间隔(秒)",
           "placeholder": "重试间隔(秒)"
         },
+        "retryCooldownPerStatus": {
+          "title": "按状态码自定义冻结时间",
+          "description": "按渠道+模型粒度冻结。优先级：上游 retryDelay > 按状态码 > 重试间隔（仅 429）。",
+          "openTooltip": "按状态码自定义",
+          "customHelper": "秒数填 0 = 不冻结，仅跳过当前请求",
+          "statusCodeLabel": "状态码",
+          "secondsLabel": "冻结秒数",
+          "delete": "删除",
+          "addRule": "+ 添加规则",
+          "close": "关闭",
+          "invalidStatusCode": "状态码 \"{{code}}\" 必须是 100-599 之间的整数",
+          "invalidSeconds": "状态码 {{code}} 的冻结秒数必须是非负整数",
+          "duplicateStatusCode": "状态码 {{code}} 重复，每个状态码只能配置一次"
+        },
         "retryTimeOut": {
           "label": "重试超时时间(秒)",
           "placeholder": "重试超时时间(秒)"
+        },
+        "channelFailErrorWrapEnabled": "封装上游错误信息",
+        "channelFailErrorWrapEnabledTooltip": "关闭后客户端将收到上游原始错误文案（可能包含 key 片段、provider 名等敏感信息），仅建议运维临时关掉用于调试",
+        "channelFailErrorMessage": {
+          "label": "渠道失败统一返回文案",
+          "placeholder": "所有非 400 的上游失败（401/403/404/429/5xx）统一坍缩为此文案 + 503；留空使用默认值"
         },
         "displayInCurrency": "以货币形式显示额度",
         "displayTokenStat": "Billing 相关 API 显示令牌额度而非用户额度",
@@ -847,6 +994,12 @@
         "unifiedRequestResponseModelTooltip": "当存在模型映射时，响应中的model值为请求的model值，而非实际调用的模型名称",
         "modelNameCaseInsensitive": "模型名称大小写不敏感",
         "modelNameCaseInsensitiveTooltip": "开启后，模型匹配时将忽略大小写，例如 GPT-4、gpt-4、Gpt-4 都会匹配到同一个模型",
+        "subGroups": {
+          "linkAndBilling": "链接与计费",
+          "retry": "重试策略",
+          "upstreamError": "上游错误处理",
+          "displayOptions": "显示与计费选项"
+        },
         "saveButton": "保存通用设置"
       },
       "invoice": {
@@ -879,7 +1032,9 @@
           "label": "日志清理时间",
           "placeholder": "日志清理时间"
         },
-        "clearLogs": "清理历史日志"
+        "clearLogs": "清理历史日志",
+        "autoDelete": "启用消费日志自动清理",
+        "autoDeleteDays": "自动清理保留天数"
       },
       "monitoringSettings": {
         "title": "监控设置",
@@ -893,6 +1048,8 @@
         },
         "automaticDisableChannel": "失败时自动禁用通道",
         "automaticEnableChannel": "成功时自动启用通道",
+        "automaticDisableChannelNotify": "自动禁用通道时发送通知",
+        "quotaRemindEnabled": "启用额度提醒邮件",
         "saveMonitoringSettings": "保存监控设置"
       },
       "quotaSettings": {
@@ -1025,7 +1182,9 @@
         "gitHubOldIdClose": "关闭 GitHub 老 ID 登录",
         "linuxDoOAuth": "允许通过 LINUX DO 账户登录 & 注册",
         "linuxDoOAuthTrustLevel": "启用 LINUX DO 信任等级限制",
-        "linuxDoOAuthDynamicTrustLevel": "LINUX DO 动态限制已注册用户（关闭后老用户不受新等级限制）"
+        "linuxDoOAuthDynamicTrustLevel": "LINUX DO 动态限制已注册用户（关闭后老用户不受新等级限制）",
+        "userAgreementEnabled": "启用用户协议",
+        "privacyPolicyEnabled": "启用隐私政策"
       },
       "configureEmailDomainWhitelist": {
         "title": "配置邮箱域名白名单",
@@ -1135,6 +1294,13 @@
     },
     "otherSettings": {
       "title": "其他设置",
+      "languageSettings": {
+        "title": "语言设置",
+        "defaultLanguageLabel": "默认语言",
+        "setDefaultLanguage": "设置默认语言",
+        "switchPromptEnabled": "根据浏览器语言提示用户切换语言",
+        "switchPromptTip": "开启后，若访客的浏览器语言与当前显示语言不一致，将提示一次是否切换。除非其浏览器语言再次发生变化，否则不会重复提示。"
+      },
       "generalSettings": {
         "title": "通用设置",
         "currentVersion": "当前版本",
@@ -1166,6 +1332,15 @@
         "newVersion": "新版本",
         "close": "关闭",
         "viewGitHub": "去GitHub查看"
+      },
+      "legalSettings": {
+        "title": "用户协议 / 隐私政策",
+        "userAgreementLabel": "用户协议内容",
+        "userAgreementPlaceholder": "在此输入用户协议内容，支持 HTML & Markdown",
+        "saveUserAgreement": "保存用户协议",
+        "privacyPolicyLabel": "隐私政策内容",
+        "privacyPolicyPlaceholder": "在此输入隐私政策内容，支持 HTML & Markdown",
+        "savePrivacyPolicy": "保存隐私政策"
       }
     }
   },
@@ -1222,6 +1397,16 @@
     "aboutDescription": "可在设置页面设置关于内容，支持 HTML & Markdown",
     "projectRepo": "项目仓库地址："
   },
+  "userAgreement": {
+    "title": "用户协议",
+    "emptyDescription": "管理员尚未配置用户协议内容。",
+    "loadingError": "加载用户协议内容失败..."
+  },
+  "privacyPolicy": {
+    "title": "隐私政策",
+    "emptyDescription": "管理员尚未配置隐私政策内容。",
+    "loadingError": "加载隐私政策内容失败..."
+  },
   "footer": {
     "developedBy": "由",
     "basedOn": "基于",
@@ -1232,6 +1417,7 @@
     "checkUpdates": "检查更新",
     "url": "URL",
     "fetchData": "获取数据",
+    "fetchFromModelsDev": "从 models.dev 获取",
     "noUpdates": "无更新",
     "newModels": "新增模型",
     "priceChangeModels": "价格变动模型(仅供参考)",
@@ -1254,9 +1440,17 @@
     "extraRatiosChanged": "扩展倍率变化",
     "extraRatiosChanges": "扩展倍率变动",
     "extraRatiosChangesTip": "扩展倍率变动：{{changes}}",
+    "longContextAdded": "新增长上下文分档",
+    "longContextRemoved": "删除长上下文分档",
+    "longContextChanged": "长上下文分档变化",
+    "longContextThreshold": "阈值",
+    "longContextInput": "输入倍率",
+    "longContextOutput": "输出倍率",
     "added": "新增",
     "removed": "删除",
-    "modified": "修改"
+    "modified": "修改",
+    "addNewOnly": "仅添加新增",
+    "overwriteData": "覆盖数据"
   },
   "error": {
     "unknownError": "未知错误"
@@ -1271,6 +1465,8 @@
     "create": "创建",
     "unknown": "未知",
     "close": "关闭",
+    "expand": "展开侧栏",
+    "collapse": "收起侧栏",
     "saveSuccess": "保存成功！",
     "unableServer": "无法正常连接至服务器！",
     "unableServerTip": "新版本可用：{{version}}，请使用快捷键 Shift + F5 刷新页面",
@@ -1281,6 +1477,9 @@
     "processing": "处理中...",
     "serverError": "服务器错误",
     "again": "重试 ({{count}})",
+    "languageSwitchPrompt": "检测到您的浏览器语言为{{language}}，是否切换为{{language}}？",
+    "languageSwitchConfirm": "切换",
+    "languageSwitchDismiss": "暂不",
     "back": "返回",
     "none": "无",
     "show": "显示",
@@ -1303,10 +1502,21 @@
     "action": "操作",
     "pageSize": "每页条数",
     "search": "搜索",
+    "searchFilters": "搜索条件",
     "actions": "操作",
     "total": "总数",
     "noDataAvailable": "没有数据可用",
-    "loading": "加载中..."
+    "noSearchResults": "没有匹配的搜索结果",
+    "loading": "加载中...",
+    "quotaInput": {
+      "equivalentTokens": "≈ {{tokens}} tokens",
+      "equivalentMoney": "≈ {{amount}}",
+      "precisionHint": "将四舍五入为 {{tokens}} tokens",
+      "toggleToCurrency": "按美元输入",
+      "toggleToToken": "按 token 数输入",
+      "overDeductLimit": "⚠ 超出可减扣上限（{{max}}）"
+    },
+    "currency": "USD"
   },
   "channel_row": {
     "priorityTip": "优先级不能小于 0",
@@ -1350,6 +1560,26 @@
     "priorityUpdateError": "优先级更新失败: {{message}}",
     "weightUpdateSuccess": "权重更新成功",
     "weightUpdateError": "权重更新失败: {{message}}",
+    "costRatioUpdateSuccess": "成本倍率更新成功",
+    "costRatioUpdateError": "成本倍率更新失败: {{message}}",
+    "rowsPerPage": "每页行数:",
+    "paginationDisplayedRows": "{{from}}-{{to}} 共 {{count}}",
+    "groupPriority": "优先级(整组)",
+    "groupPriorityTip": "应用于该标签下全部渠道",
+    "groupWeight": "组权重",
+    "groupWeightTip": "应用于该标签下全部渠道",
+    "groupCostRatio": "组倍率",
+    "groupCostRatioTip": "应用于该标签下全部渠道",
+    "groupCount": "共 {{count}}",
+    "groupEnabled": "{{count}} 启用",
+    "groupDisabled": "{{count}} 禁用",
+    "expandGroup": "展开渠道列表",
+    "collapseGroup": "收起渠道列表",
+    "avgLabel": "平均",
+    "sumLabel": "合计",
+    "groupStatusSummary": "{{count}} 个渠道 · {{enabled}} 启用 / {{disabled}} 禁用",
+    "mixed": "混合",
+    "mixedTip": "该标签下渠道的类型/分组不一致；分组统一编辑会把整组覆盖为同一项",
     "deleteTagAndChannels": "删除标签及其所有渠道",
     "tagChannelList": "标签渠道列表",
     "refreshList": "刷新列表",
@@ -1365,7 +1595,11 @@
     "disable": "禁用",
     "tagChannelsSuccess": "标签渠道{{action}}成功",
     "tagChannelsError": "标签渠道{{action}}失败: {{message}}",
-    "batchDeleteConfirm": "确定要删除选中的 {{count}} 个渠道吗？此操作不可恢复。"
+    "batchDeleteConfirm": "确定要删除选中的 {{count}} 个渠道吗？此操作不可恢复。",
+    "wholeGroup": "整组",
+    "groupPriorityLabel": "优先级·组",
+    "groupWeightLabel": "权重·组",
+    "groupCostRatioLabel": "倍率·组"
   },
   "validation": {
     "requiredName": "名称 不能为空"
@@ -1428,6 +1662,11 @@
     "promptRatio": "提示倍率",
     "completionRatio": "完成倍率",
     "noAvailableRatios": "没有可用的扩展倍率",
+    "longContext": "长上下文分档",
+    "longContextThreshold": "阈值(tokens)",
+    "longContextInputRatio": "输入倍率",
+    "longContextOutputRatio": "输出倍率",
+    "longContextHelp": "输入 token 超过阈值时，整次请求按上述倍率计费；阈值留空或为 0 表示不启用。",
     "delMultipleInfoTip": "确定删除所选的 {{count}} 个价格吗？"
   },
   "redemption_edit": {
@@ -1466,7 +1705,66 @@
     "noTest": "未测试"
   },
   "home": {
-    "loadingErr": "加载首页内容失败..."
+    "loadingErr": "加载首页内容失败...",
+    "hero": {
+      "title": "所有模型，一个接口",
+      "subtitle": "聚合 OpenAI、Claude、Gemini、DeepSeek 等数十家模型供应商，统一为 OpenAI 兼容接口。替换 base_url 即可接入，密钥、计费与日志集中管理。",
+      "getStarted": "开始使用",
+      "console": "进入控制台",
+      "viewPricing": "查看价格"
+    },
+    "stats": {
+      "channels": "渠道类型",
+      "protocols": "原生协议",
+      "openSource": "完全开源"
+    },
+    "code": {
+      "title": "三种协议，同一入口",
+      "subtitle": "OpenAI、Claude、Gemini 协议原生转发，不做改写。",
+      "reply": "你好,我是 {{model}},通过 Done Hub 接入。"
+    },
+    "providers": {
+      "title": "覆盖数十家模型供应商",
+      "subtitle": "国内外主流模型均已接入，统一为 OpenAI 兼容格式，新供应商持续更新。"
+    },
+    "features": {
+      "title": "不止于接入",
+      "subtitle": "渠道调度、计费分组、用量日志、客户端接入，集中在同一套后台。",
+      "items": {
+        "routing": {
+          "title": "渠道调度",
+          "desc": "按优先级与权重分配流量，异常自动切换并冷却恢复。"
+        },
+        "billing": {
+          "title": "计费分组",
+          "desc": "令牌、用户组、定价、额度、账单，成本可追溯。"
+        },
+        "observability": {
+          "title": "日志用量",
+          "desc": "RPM／TPM、消费明细、请求日志，可按用户统计导出。"
+        },
+        "clients": {
+          "title": "客户端接入",
+          "desc": "Claude Code、Gemini CLI、Codex 等客户端直接指向，按原生协议转发。"
+        }
+      }
+    },
+    "howItWorks": {
+      "title": "四步完成接入",
+      "subtitle": "从部署到客户端接入，对应真实的请求路径。",
+      "s1Title": "部署",
+      "s1Desc": "用 Docker 启动 Done Hub，完成基础配置。",
+      "s2Title": "配置渠道",
+      "s2Desc": "启用 OpenAI、Claude、Gemini 等渠道，填入上游密钥。",
+      "s3Title": "接入客户端",
+      "s3Desc": "OpenAI 用 /v1，Claude 用 /claude/v1，Gemini 用 /gemini。",
+      "s4Title": "运营",
+      "s4Desc": "查看仪表盘与日志，管理计费与渠道状态。"
+    },
+    "cta": {
+      "title": "完全开源，欢迎 Star 与贡献",
+      "github": "前往 GitHub"
+    }
   },
   "jump": "正在跳转中...",
   "渠道名称": "渠道名称",
@@ -1588,6 +1886,9 @@
     "id": "ID",
     "symbol": "标识",
     "name": "名称",
+    "description": "描述",
+    "descriptionTip": "面向用户展示的分组说明，最长 500 字符",
+    "descriptionTooLong": "描述最长 500 字符",
     "ratio": "倍率",
     "public": "是否公开",
     "promotion": "自动升级",

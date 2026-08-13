@@ -4,6 +4,9 @@ import (
 	"done-hub/common"
 	"done-hub/common/config"
 	"done-hub/common/logger"
+	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,16 +38,23 @@ func InitOptionMap() {
 	config.GlobalOption.RegisterBool("OIDCAuthEnabled", &config.OIDCAuthEnabled)
 	config.GlobalOption.RegisterBool("LinuxDoOAuthEnabled", &config.LinuxDoOAuthEnabled)
 	config.GlobalOption.RegisterBool("InviteCodeRegisterEnabled", &config.InviteCodeRegisterEnabled)
+	config.GlobalOption.RegisterBool("UserAgreementEnabled", &config.UserAgreementEnabled)
+	config.GlobalOption.RegisterBool("PrivacyPolicyEnabled", &config.PrivacyPolicyEnabled)
 	config.GlobalOption.RegisterBool("LinuxDoOAuthTrustLevelEnabled", &config.LinuxDoOAuthTrustLevelEnabled)
 	config.GlobalOption.RegisterBool("LinuxDoOAuthDynamicTrustLevel", &config.LinuxDoOAuthDynamicTrustLevel)
 	config.GlobalOption.RegisterBool("TurnstileCheckEnabled", &config.TurnstileCheckEnabled)
 	config.GlobalOption.RegisterBool("RegisterEnabled", &config.RegisterEnabled)
 	config.GlobalOption.RegisterBool("AutomaticDisableChannelEnabled", &config.AutomaticDisableChannelEnabled)
 	config.GlobalOption.RegisterBool("AutomaticEnableChannelEnabled", &config.AutomaticEnableChannelEnabled)
+	config.GlobalOption.RegisterBool("AutomaticDisableChannelNotifyEnabled", &config.AutomaticDisableChannelNotifyEnabled)
 	config.GlobalOption.RegisterBool("ApproximateTokenEnabled", &config.ApproximateTokenEnabled)
 	config.GlobalOption.RegisterBool("LogConsumeEnabled", &config.LogConsumeEnabled)
+	config.GlobalOption.RegisterBool("LogAutoDeleteEnabled", &config.LogAutoDeleteEnabled)
+	config.GlobalOption.RegisterInt("LogAutoDeleteDays", &config.LogAutoDeleteDays)
 	config.GlobalOption.RegisterBool("EmptyResponseBillingEnabled", &config.EmptyResponseBillingEnabled)
+	config.GlobalOption.RegisterInt("MaxPromptTokens", &config.MaxPromptTokens)
 	config.GlobalOption.RegisterBool("DisplayInCurrencyEnabled", &config.DisplayInCurrencyEnabled)
+	config.GlobalOption.RegisterBool("DisplayTokenStatEnabled", &config.DisplayTokenStatEnabled)
 	config.GlobalOption.RegisterFloat("ChannelDisableThreshold", &config.ChannelDisableThreshold)
 	config.GlobalOption.RegisterBool("EmailDomainRestrictionEnabled", &config.EmailDomainRestrictionEnabled)
 
@@ -63,7 +73,11 @@ func InitOptionMap() {
 	config.GlobalOption.RegisterValue("Notice")
 	config.GlobalOption.RegisterValue("About")
 	config.GlobalOption.RegisterValue("HomePageContent")
+	config.GlobalOption.RegisterValue("UserAgreement")
+	config.GlobalOption.RegisterValue("PrivacyPolicy")
 	config.GlobalOption.RegisterString("Footer", &config.Footer)
+	config.GlobalOption.RegisterString("Language", &config.Language)
+	config.GlobalOption.RegisterBool("LanguageSwitchPromptEnabled", &config.LanguageSwitchPromptEnabled)
 	config.GlobalOption.RegisterString("SystemName", &config.SystemName)
 	config.GlobalOption.RegisterString("Logo", &config.Logo)
 	config.GlobalOption.RegisterString("AnalyticsCode", &config.AnalyticsCode)
@@ -92,6 +106,7 @@ func InitOptionMap() {
 	config.GlobalOption.RegisterInt("QuotaForInvitee", &config.QuotaForInvitee)
 	config.GlobalOption.RegisterString("InviterRewardType", &config.InviterRewardType)
 	config.GlobalOption.RegisterInt("InviterRewardValue", &config.InviterRewardValue)
+	config.GlobalOption.RegisterBool("QuotaRemindEnabled", &config.QuotaRemindEnabled)
 	config.GlobalOption.RegisterInt("QuotaRemindThreshold", &config.QuotaRemindThreshold)
 	config.GlobalOption.RegisterInt("PreConsumedQuota", &config.PreConsumedQuota)
 
@@ -101,6 +116,38 @@ func InitOptionMap() {
 	config.GlobalOption.RegisterFloat("QuotaPerUnit", &config.QuotaPerUnit)
 	config.GlobalOption.RegisterInt("RetryTimes", &config.RetryTimes)
 	config.GlobalOption.RegisterInt("RetryCooldownSeconds", &config.RetryCooldownSeconds)
+	config.GlobalOption.RegisterBool("ChannelFailErrorWrapEnabled", &config.ChannelFailErrorWrapEnabled)
+	config.GlobalOption.RegisterString("ChannelFailErrorMessage", &config.ChannelFailErrorMessage)
+	config.GlobalOption.RegisterCustom("RetryCooldownPerStatus", func() string {
+		return config.RetryCooldownPerStatus
+	}, func(value string) error {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			config.RetryCooldownPerStatus = ""
+			config.SetRetryCooldownPerStatusMap(map[int]int{})
+			return nil
+		}
+		// Accept both `{"503":120}` and `{"503":"120"}` forms; reject anything else.
+		raw := map[string]json.Number{}
+		if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+			return fmt.Errorf("RetryCooldownPerStatus must be a JSON object of status->seconds: %w", err)
+		}
+		parsed := make(map[int]int, len(raw))
+		for k, v := range raw {
+			code, err := strconv.Atoi(strings.TrimSpace(k))
+			if err != nil || code < 100 || code > 599 {
+				return fmt.Errorf("invalid status code %q (must be 100-599)", k)
+			}
+			secs, err := v.Int64()
+			if err != nil || secs < 0 {
+				return fmt.Errorf("invalid cooldown for status %s: %q (must be non-negative integer)", k, v.String())
+			}
+			parsed[code] = int(secs)
+		}
+		config.RetryCooldownPerStatus = trimmed
+		config.SetRetryCooldownPerStatusMap(parsed)
+		return nil
+	}, "")
 
 	config.GlobalOption.RegisterBool("MjNotifyEnabled", &config.MjNotifyEnabled)
 	config.GlobalOption.RegisterBool("BuiltinChatEnabled", &config.BuiltinChatEnabled)

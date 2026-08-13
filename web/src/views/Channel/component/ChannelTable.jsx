@@ -14,9 +14,11 @@ import { fetchChannelData } from '../ChannelList';
 import { API } from 'utils/api';
 import { showError, showSuccess, trims } from 'utils/common';
 import { useTranslation } from 'react-i18next';
+import useStickyShadow from 'hooks/useStickyShadow';
 
 export default function ChannelTable({ tag }) {
   const { t } = useTranslation();
+  const stickyShadowRef = useStickyShadow();
   const [page, setPage] = useState(0);
   const [order, setOrder] = useState('desc');
   const [orderBy, setOrderBy] = useState('id');
@@ -98,6 +100,15 @@ export default function ChannelTable({ tag }) {
             weight: parseInt(value)
           });
           break;
+        case 'cost_ratio':
+          if (value === '') {
+            return;
+          }
+          res = await API.put(url, {
+            ...data,
+            cost_ratio: Number(value)
+          });
+          break;
         case 'test':
           res = await API.get(url + `test/${id}`, {
             params: { model: value }
@@ -139,8 +150,8 @@ export default function ChannelTable({ tag }) {
   return (
     <>
       {searching && <LinearProgress />}
-      <PerfectScrollbar component="div">
-        <TableContainer>
+      <PerfectScrollbar component="div" containerRef={stickyShadowRef}>
+        <TableContainer sx={{ overflow: 'unset' }}>
           <Table sx={{ minWidth: 800 }}>
             <KeywordTableHead
               order={order}
@@ -158,7 +169,8 @@ export default function ChannelTable({ tag }) {
                 { id: 'used', label: t('channel_index.usedBalance'), disableSort: false },
                 { id: 'priority', label: t('channel_index.priority'), disableSort: false, width: '80px' },
                 { id: 'weight', label: t('channel_index.weight'), disableSort: false, width: '80px' },
-                { id: 'action', label: t('userPage.action'), disableSort: true }
+                { id: 'cost_ratio', label: t('channel_index.costRatio'), disableSort: false, width: '90px' },
+                { id: 'action', label: t('userPage.action'), disableSort: true, sticky: true }
               ]}
             />
             <TableBody>

@@ -1,13 +1,14 @@
 import PropTypes from 'prop-types'
 import { useState } from 'react'
 
-import { Button, IconButton, MenuItem, Popover, TableCell, TableRow } from '@mui/material'
+import { Button, IconButton, MenuItem, Popover, TableCell, TableRow, Tooltip } from '@mui/material'
 
 import Label from 'ui-component/Label'
 import TableSwitch from 'ui-component/Switch'
 import ConfirmDialog from 'ui-component/confirm-dialog'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '@iconify/react'
+import { stickyCellSx } from 'ui-component/stickyCellSx'
 
 export default function UserGroupTableRow({ item, manageUserGroup, handleOpenModal, setModalUserGroupId }) {
   const { t } = useTranslation()
@@ -52,6 +53,11 @@ export default function UserGroupTableRow({ item, manageUserGroup, handleOpenMod
 
         <TableCell>{item.symbol}</TableCell>
         <TableCell>{item.name}</TableCell>
+        <Tooltip title={item.description || ''} placement="top" disableHoverListener={!item.description}>
+          <TableCell sx={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {item.description || '-'}
+          </TableCell>
+        </Tooltip>
         <TableCell>{item.ratio}</TableCell>
         <TableCell>{item.api_rate}</TableCell>
         <TableCell>
@@ -70,7 +76,9 @@ export default function UserGroupTableRow({ item, manageUserGroup, handleOpenMod
           {' '}
           <TableSwitch id={`switch-${item.id}`} checked={statusSwitch} onChange={handleStatus}/>
         </TableCell>
-        <TableCell>
+        <TableCell
+          sx={stickyCellSx}
+        >
           <IconButton onClick={handleOpenMenu} sx={{ color: 'rgb(99, 115, 129)' }}>
             <Icon icon="solar:menu-dots-circle-bold-duotone"/>
           </IconButton>

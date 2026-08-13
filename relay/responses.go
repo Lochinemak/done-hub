@@ -2,6 +2,7 @@ package relay
 
 import (
 	"done-hub/common"
+	"done-hub/common/config"
 	"done-hub/common/requester"
 	providersBase "done-hub/providers/base"
 	"done-hub/relay/relay_util"
@@ -18,10 +19,19 @@ import (
 type relayResponses struct {
 	relayBase
 	responsesRequest types.OpenAIResponsesRequest
+	isCompact        bool
 }
 
 func NewRelayResponses(c *gin.Context) *relayResponses {
 	relay := &relayResponses{}
+	relay.c = c
+	return relay
+}
+
+// NewRelayResponsesCompact 处理 POST /v1/responses/compact。
+// 与 NewRelayResponses 共用请求结构和路由，仅在 send() 阶段走 compact 分支。
+func NewRelayResponsesCompact(c *gin.Context) *relayResponses {
+	relay := &relayResponses{isCompact: true}
 	relay.c = c
 	return relay
 }
@@ -41,6 +51,10 @@ func (r *relayResponses) getRequest() interface{} {
 }
 
 func (r *relayResponses) IsStream() bool {
+	// compact 端点永远是非流式响应，不受请求体中 stream 字段影响。
+	if r.isCompact {
+		return false
+	}
 	return r.responsesRequest.Stream
 }
 
@@ -51,6 +65,11 @@ func (r *relayResponses) getPromptTokens() (int, error) {
 
 func (r *relayResponses) send() (err *types.OpenAIErrorWithStatusCode, done bool) {
 	r.responsesRequest.Model = r.modelName
+
+	if r.isCompact {
+		return r.sendCompact()
+	}
+
 	channel := r.provider.GetChannel()
 	responsesProvider, ok := r.provider.(providersBase.ResponsesInterface)
 	if !ok || channel.CompatibleResponse || !r.provider.GetSupportedResponse() {
@@ -64,6 +83,10 @@ func (r *relayResponses) send() (err *types.OpenAIErrorWithStatusCode, done bool
 
 		return r.compatibleSend(chatProvider)
 	}
+
+	// 入口协议 == responses 且走 responses provider 原样直返，放行响应字节透传；
+	// 上方 chat 兼容路径（compatibleSend）已提前返回，不会走到这里。
+	r.c.Set(config.GinRawPassThroughAllowedKey, true)
 
 	if r.responsesRequest.Stream {
 		var response requester.StreamReaderInterface[string]
@@ -95,6 +118,33 @@ func (r *relayResponses) send() (err *types.OpenAIErrorWithStatusCode, done bool
 		done = true
 	}
 
+	return
+}
+
+// sendCompact 处理 /v1/responses/compact 请求。
+// compact 不支持 chat 兼容路径（chat 渠道没有 compact 概念），
+// 不支持的渠道直接返回错误。
+func (r *relayResponses) sendCompact() (err *types.OpenAIErrorWithStatusCode, done bool) {
+	compactProvider, ok := r.provider.(providersBase.ResponsesCompactInterface)
+	if !ok || !r.provider.GetSupportedResponse() {
+		err = common.StringErrorWrapperLocal("channel does not support /v1/responses/compact", "channel_error", http.StatusServiceUnavailable)
+		done = true
+		return
+	}
+
+	// compact 端点：responses 协议原样直返，放行响应字节透传。
+	r.c.Set(config.GinRawPassThroughAllowedKey, true)
+
+	response, err := compactProvider.CreateResponsesCompaction(&r.responsesRequest)
+	if err != nil {
+		done = true
+		return
+	}
+
+	if openErr := responseJsonClient(r.c, response); openErr != nil {
+		err = openErr
+		done = true
+	}
 	return
 }
 

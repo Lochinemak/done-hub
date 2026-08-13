@@ -8,12 +8,7 @@ import componentStyleOverrides from './compStyleOverride';
 import themePalette from './palette';
 import themeTypography from './typography';
 import { varAlpha, createGradient } from './utils';
-
-// 创建自定义渐变背景色
-const customGradients = {
-  primary: createGradient(colors.primaryMain, colors.primaryDark),
-  secondary: createGradient(colors.secondaryMain, colors.secondaryDark)
-};
+import { getPrimaryColors } from './presets';
 
 /**
  * Represent theme style and structure as per Material-UI
@@ -21,8 +16,14 @@ const customGradients = {
  */
 
 export const theme = (customization) => {
-  const color = colors;
-  const options = customization.theme === 'light' ? GetLightOption() : GetDarkOption();
+  // 用用户选择的主题色覆盖默认主色
+  const color = { ...colors, ...getPrimaryColors(customization.primaryColor) };
+  // 创建自定义渐变背景色
+  const customGradients = {
+    primary: createGradient(color.primaryMain, color.primaryDark),
+    secondary: createGradient(color.secondaryMain, color.secondaryDark)
+  };
+  const options = customization.theme === 'light' ? GetLightOption(color) : GetDarkOption(color);
   const themeOption = {
     colors: color,
     gradients: customGradients,
@@ -43,7 +44,7 @@ export const theme = (customization) => {
       }
     },
     shape: {
-      borderRadius: themeOption?.customization?.borderRadius || 12
+      borderRadius: themeOption?.customization?.borderRadius || 8
     },
     typography: themeTypography(themeOption),
     breakpoints: {
@@ -63,6 +64,9 @@ export const theme = (customization) => {
   };
 
   const themes = createTheme(themeOptions);
+  // 把自定义 themeOption 字段挂到 MUI theme 上，sx callback (theme) => theme.xxx 才拿得到
+  themes.headBackgroundColor = themeOption.headBackgroundColor;
+  themes.tableRowHoverBackgroundColor = themeOption.tableRowHoverBackgroundColor;
   themes.components = componentStyleOverrides(themeOption);
 
   return themes;
@@ -70,50 +74,50 @@ export const theme = (customization) => {
 
 export default theme;
 
-function GetDarkOption() {
-  const color = colors;
+function GetDarkOption(color) {
   return {
     mode: 'dark',
-    heading: color.darkTextTitle,
-    paper: '#1A1D23',
-    backgroundDefault: '#13151A',
-    background: '#1E2128',
-    darkTextPrimary: '#E0E4EC',
-    darkTextSecondary: '#A9B2C3',
-    textDark: '#F8F9FC',
-    menuSelected: color.primary200,
-    menuSelectedBack: varAlpha(color.primaryMain, 0.12),
-    divider: 'rgba(255, 255, 255, 0.1)',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    menuButton: '#292D36',
+    heading: '#FFFFFF',
+    paper: color.darkPaper,
+    backgroundDefault: color.darkBackground,
+    background: color.darkLevel2,
+    darkTextPrimary: '#FFFFFF',
+    darkTextSecondary: color.grey500,
+    textDark: '#FFFFFF',
+    menuSelected: color.primaryLight,
+    menuSelectedBack: varAlpha(color.primaryMain, 0.16),
+    divider: varAlpha(color.grey500, 0.2),
+    borderColor: varAlpha(color.grey500, 0.2),
+    menuButton: '#28323D',
     menuButtonColor: color.primaryMain,
-    menuChip: '#292D36',
-    headBackgroundColor: '#25282F',
-    headBackgroundColorHover: varAlpha('#25282F', 0.08),
-    tableBorderBottom: 'rgba(255, 255, 255, 0.08)'
+    menuChip: '#28323D',
+    headBackgroundColor: '#28323D',
+    headBackgroundColorHover: varAlpha('#28323D', 0.08),
+    tableRowHoverBackgroundColor: 'rgba(0, 0, 0, 0.3)',
+    tableBorderBottom: varAlpha(color.grey500, 0.2)
   };
 }
 
-function GetLightOption() {
-  const color = colors;
+function GetLightOption(color) {
   return {
     mode: 'light',
-    heading: '#202939',
+    heading: color.grey800,
     paper: '#FFFFFF',
-    backgroundDefault: '#F5F7FA',
-    background: '#F5F7FA',
-    darkTextPrimary: '#3E4555',
-    darkTextSecondary: '#6C7A92',
-    textDark: '#252F40',
+    backgroundDefault: color.grey200,
+    background: color.grey200,
+    darkTextPrimary: color.grey800,
+    darkTextSecondary: color.grey600,
+    textDark: color.grey800,
     menuSelected: color.primaryMain,
-    menuSelectedBack: varAlpha(color.primary200, 0.08),
-    divider: '#E9EDF5',
-    borderColor: '#E0E6ED',
-    menuButton: varAlpha(color.primary200, 0.12),
+    menuSelectedBack: varAlpha(color.primaryMain, 0.08),
+    divider: varAlpha(color.grey500, 0.2),
+    borderColor: color.grey300,
+    menuButton: varAlpha(color.primaryMain, 0.08),
     menuButtonColor: color.primaryMain,
-    menuChip: '#EEF2F6',
-    headBackgroundColor: '#F5F7FA',
-    headBackgroundColorHover: varAlpha('#F5F7FA', 0.12),
-    tableBorderBottom: '#E9EDF5'
+    menuChip: color.grey200,
+    headBackgroundColor: color.grey200,
+    headBackgroundColorHover: varAlpha(color.grey200, 0.12),
+    tableRowHoverBackgroundColor: 'rgba(0, 0, 0, 0.04)',
+    tableBorderBottom: color.grey300
   };
 }

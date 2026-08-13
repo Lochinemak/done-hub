@@ -31,9 +31,13 @@ const (
 	ErrChannelDisabled                   = "该渠道已被禁用"
 )
 
-// 关键词常量
-const (
-	KeywordNoAvailableChannel = "无可用渠道"
+// runtime 错误 sentinel：表示"模型有配但渠道暂时不可用"（列表空、全冷却/过滤、指定 id 失效或被禁），
+// 与"配置层就没配"的错误区分开。必须是 sentinel —— fetchChannelByModel 会 wrap，上层用 errors.Is 跨层判定。
+var (
+	ErrNoChannelsAvailableSentinel               = errors.New(ErrNoChannelsAvailable)
+	ErrNoAvailableChannelsAfterFilteringSentinel = errors.New(ErrNoAvailableChannelsAfterFiltering)
+	ErrInvalidChannelIdSentinel                  = errors.New(ErrInvalidChannelId)
+	ErrChannelDisabledSentinel                   = errors.New(ErrChannelDisabled)
 )
 
 type ChannelChoice struct {
@@ -397,14 +401,13 @@ func generateClaudeCodeSessionHash(requestMap map[string]interface{}) string {
 		return ""
 	}
 
-	// 1. 最高优先级：使用 metadata.user_id 中的 session ID
+	// 1. 最高优先级：使用 metadata.user_id 中的 session ID。
+	//    user_id 可能是旧字符串格式 user_<hex>_account__session_<uuid>，
+	//    也可能是新对象格式 {"device_id":...,"account_uuid":...,"session_id":"<uuid>"}（claude-cli）。
 	if metadataInterface, exists := requestMap["metadata"]; exists {
 		if metadataMap, ok := metadataInterface.(map[string]interface{}); ok {
-			if userID, ok := metadataMap["user_id"].(string); ok && userID != "" {
-				// 提取 session_xxx 部分
-				sessionID := session.ExtractSessionIDFromMetadata(userID)
-				if sessionID != "" {
-					// 直接返回 session ID（36个字符的 UUID）
+			if userIDRaw, exists := metadataMap["user_id"]; exists {
+				if sessionID := session.ExtractSessionIDFromMetadataValue(userIDRaw); sessionID != "" {
 					return sessionID
 				}
 			}
@@ -740,7 +743,7 @@ func (cc *ChannelsChooser) NextByValidatedModel(group, validatedModelName string
 	}
 
 	if len(channelsPriority) == 0 {
-		return nil, errors.New(ErrNoChannelsAvailable)
+		return nil, ErrNoChannelsAvailableSentinel
 	}
 
 	for _, priority := range channelsPriority {
@@ -750,7 +753,7 @@ func (cc *ChannelsChooser) NextByValidatedModel(group, validatedModelName string
 		}
 	}
 
-	return nil, errors.New(ErrNoAvailableChannelsAfterFiltering)
+	return nil, ErrNoAvailableChannelsAfterFilteringSentinel
 }
 
 func (cc *ChannelsChooser) GetGroupModels(group string) ([]string, error) {
