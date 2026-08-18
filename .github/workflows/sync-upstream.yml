@@ -1,0 +1,78 @@
+name: Sync upstream commits
+
+on:
+  schedule:
+    # Run every 6 hours. GitHub Actions cron uses UTC.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: deanxv/done-hub
+  UPSTREAM_BRANCH: main
+
+jobs:
+  cherry-pick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch branches and upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/dev:refs/remotes/origin/dev"
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags upstream "${UPSTREAM_BRANCH}"
+
+      - name: Cherry-pick new upstream commits
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for target_branch in main dev; do
+            echo "::group::Sync ${target_branch}"
+            git switch --force-create "${target_branch}" "origin/${target_branch}"
+
+            # `git cherry` compares patch IDs, so commits already cherry-picked
+            # under a different SHA are not selected again.
+            mapfile -t commits < <(
+              git cherry "origin/${target_branch}" "upstream/${UPSTREAM_BRANCH}" |
+                awk '$1 == "+" { print $2 }'
+            )
+
+            if (( ${#commits[@]} == 0 )); then
+              echo "${target_branch} is already up to date."
+              echo "::endgroup::"
+              continue
+            fi
+
+            echo "Cherry-picking ${#commits[@]} upstream commit(s) into ${target_branch}:"
+            printf '  %s\n' "${commits[@]}"
+
+            for commit in "${commits[@]}"; do
+              if ! git cherry-pick "${commit}"; then
+                git status --short
+                git cherry-pick --abort
+                echo "::error::Cherry-pick ${commit} into ${target_branch} failed. Resolve the conflict manually, then run the workflow again."
+                exit 1
+              fi
+            done
+
+            git push origin "HEAD:${target_branch}"
+            echo "::endgroup::"
+          done
