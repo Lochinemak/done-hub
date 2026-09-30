@@ -27,7 +27,7 @@ func (r *relayModerations) setRequest() error {
 	setLogUserInput(r.c, extractFirstStringValue(r.request.Input))
 
 	if r.request.Model == "" {
-		r.request.Model = "text-moderation-stable"
+		r.request.Model = "omni-moderation-latest"
 	}
 
 	r.setOriginalModel(r.request.Model)
