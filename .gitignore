@@ -16,6 +16,7 @@ config.yaml
 dist
 test.yaml
 one-api
+done-hub
 _output
 .DS_Store
 .ace-tool/
