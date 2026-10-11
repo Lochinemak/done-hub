@@ -263,7 +263,7 @@ func ExportUserLogsList(c *gin.Context) {
 	// Write CSV headers (without admin-only columns)
 	headers := []string{
 		"时间", "分组", "令牌", "类型", "模型",
-		"耗时(秒)", "用户输入", "输入Token", "输出Token", "额度", "来源IP", "请求ID", "详情",
+		"耗时(秒)", "输入Token", "输出Token", "额度", "来源IP", "请求ID", "详情",
 	}
 	if err := writer.Write(headers); err != nil {
 		common.APIRespondWithError(c, http.StatusOK, err)
@@ -354,7 +354,7 @@ func formatLogToCSVRow(log *model.Log, isAdmin bool) []string {
 			detailStr,
 		}
 	} else {
-		// User view excludes admin-only columns (含上游请求ID)
+		// User view excludes admin-only columns (含上游请求ID、用户输入)
 		return []string{
 			timeStr,
 			groupStr,
@@ -362,7 +362,6 @@ func formatLogToCSVRow(log *model.Log, isAdmin bool) []string {
 			typeStr,
 			log.ModelName,
 			durationStr,
-			log.UserInput,
 			inputTokensStr,
 			outputTokensStr,
 			quotaStr,

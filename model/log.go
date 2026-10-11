@@ -19,7 +19,7 @@ type Log struct {
 	CreatedAt        int64  `json:"created_at" gorm:"bigint;index:idx_created_at_type;index:idx_user_created_at"`
 	Type             int    `json:"type" gorm:"index:idx_created_at_type"`
 	Content          string `json:"content"`
-	UserInput        string `json:"user_input" gorm:"type:text"`
+	UserInput        string `json:"user_input,omitempty" gorm:"type:text"`
 	Username         string `json:"username" gorm:"index:index_username_model_name,priority:2;default:''"`
 	TokenName        string `json:"token_name" gorm:"index;default:''"`
 	ModelName        string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
@@ -329,7 +329,7 @@ func GetAllLogsList(params *LogsListParams) ([]*Log, error) {
 func GetUserLogsList(userId int, params *LogsListParams) (*DataResult[Log], error) {
 	var logs []*Log
 
-	tx := DB.Where("user_id = ?", userId).Omit("id", "cost_quota", "channel_id", "upstream_request_id")
+	tx := DB.Where("user_id = ?", userId).Omit("id", "cost_quota", "channel_id", "upstream_request_id", "user_input")
 
 	if params.LogType != LogTypeUnknown {
 		tx = tx.Where("type = ?", params.LogType)
@@ -369,7 +369,7 @@ func GetUserLogsList(userId int, params *LogsListParams) (*DataResult[Log], erro
 func GetAllUserLogsList(userId int, params *LogsListParams) ([]*Log, error) {
 	var logs []*Log
 
-	tx := DB.Where("user_id = ?", userId).Omit("id", "cost_quota", "channel_id", "upstream_request_id")
+	tx := DB.Where("user_id = ?", userId).Omit("id", "cost_quota", "channel_id", "upstream_request_id", "user_input")
 
 	if params.LogType != LogTypeUnknown {
 		tx = tx.Where("type = ?", params.LogType)
@@ -433,7 +433,7 @@ func SearchAllLogs(keyword string) (logs []*Log, err error) {
 }
 
 func SearchUserLogs(userId int, keyword string) (logs []*Log, err error) {
-	err = DB.Where("user_id = ? and type = ?", userId, keyword).Order("id desc").Limit(config.MaxRecentItems).Omit("id", "cost_quota", "channel_id", "upstream_request_id").Find(&logs).Error
+	err = DB.Where("user_id = ? and type = ?", userId, keyword).Order("id desc").Limit(config.MaxRecentItems).Omit("id", "cost_quota", "channel_id", "upstream_request_id", "user_input").Find(&logs).Error
 	return logs, err
 }
 

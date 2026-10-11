@@ -166,7 +166,7 @@ export default function LogTableRow({ item, userIsAdmin, userGroup, columnVisibi
             </Stack>
           </TableCell>
         )}
-        {columnVisibility.user_input && (
+        {userIsAdmin && columnVisibility.user_input && (
           <TableCell
             sx={{
               p: '10px 8px',

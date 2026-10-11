@@ -586,7 +586,7 @@ export default function Log() {
                 { id: 'type', label: t('logPage.typeLabel') },
                 { id: 'model_name', label: t('logPage.modelLabel') },
                 { id: 'duration', label: t('logPage.durationLabel') },
-                { id: 'user_input', label: t('logPage.userInputLabel') },
+                { id: 'user_input', label: t('logPage.userInputLabel'), adminOnly: true },
                 { id: 'message', label: t('logPage.inputLabel') },
                 { id: 'completion', label: t('logPage.outputLabel') },
                 { id: 'quota', label: t('logPage.quotaLabel') },
@@ -668,7 +668,7 @@ export default function Log() {
                     id: 'user_input',
                     label: t('logPage.userInputLabel'),
                     disableSort: true,
-                    hide: !columnVisibility.user_input
+                    hide: !columnVisibility.user_input || !userIsAdmin
                   },
                   {
                     id: 'message',
