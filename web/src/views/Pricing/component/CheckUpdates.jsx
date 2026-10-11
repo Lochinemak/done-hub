@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -18,7 +18,9 @@ import {
   Divider,
   List,
   ListItem,
-  ListItemText
+  ListItemText,
+  FormControlLabel,
+  Switch
 } from '@mui/material';
 import { useTranslation } from 'react-i18next';
 import { API } from 'utils/api';
@@ -35,6 +37,9 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
   const [newPricing, setNewPricing] = useState([]);
   const [addModel, setAddModel] = useState([]);
   const [diffModel, setDiffModel] = useState([]);
+  // 渠道里实际提供的模型名；公共价格源动辄上千个模型，默认只处理这些，避免把无关模型全部导入
+  const [channelModels, setChannelModels] = useState([]);
+  const [channelOnly, setChannelOnly] = useState(() => localStorage.getItem('oneapi_price_update_channel_only') !== 'false');
 
   // 从localStorage获取保存的URL
   useEffect(() => {
@@ -45,6 +50,42 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
       fetchDefaultUrl();
     }
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const fetchChannelModels = async () => {
+      try {
+        const res = await API.get('/api/prices/channel_model_list');
+        const { success, data } = res.data;
+        if (success && Array.isArray(data)) {
+          setChannelModels(data);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchChannelModels();
+  }, [open]);
+
+  const handleChannelOnlyChange = (e) => {
+    const checked = e.target.checked;
+    setChannelOnly(checked);
+    localStorage.setItem('oneapi_price_update_channel_only', String(checked));
+  };
+
+  // 开关打开时只保留渠道里有的模型（按模型名精确匹配）；预览、同步都基于这份过滤后的列表
+  const channelModelSet = useMemo(() => new Set(channelModels), [channelModels]);
+  const effectivePricing = useMemo(
+    () => (channelOnly ? newPricing.filter((np) => channelModelSet.has(np.model)) : newPricing),
+    [channelOnly, newPricing, channelModelSet]
+  );
+  // 渠道里有、本地还没价格、价格源也没提供的模型：同步后依然缺价，需要手动补
+  const missingInSource = useMemo(() => {
+    if (!newPricing.length) return [];
+    const sourceSet = new Set(newPricing.map((np) => np.model));
+    const pricedSet = new Set(row.map((r) => r.model));
+    return channelModels.filter((m) => !sourceSet.has(m) && !pricedSet.has(m));
+  }, [newPricing, channelModels, row]);
 
   const fetchDefaultUrl = async () => {
     try {
@@ -112,6 +153,11 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
       setUpdateLoading(false);
       return;
     }
+    if (!effectivePricing.length) {
+      showError(t('CheckUpdatesTable.noMatchedChannelModels'));
+      setUpdateLoading(false);
+      return;
+    }
 
     if (updateMode === 'add' && !addModel.length) {
       showError(t('CheckUpdatesTable.noNewModels'));
@@ -119,7 +165,7 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
       return;
     }
     try {
-      const res = await API.post('/api/prices/sync?updateMode=' + updateMode, newPricing);
+      const res = await API.post('/api/prices/sync?updateMode=' + updateMode, effectivePricing);
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('CheckUpdatesTable.operationCompleted'));
@@ -229,10 +275,10 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
   );
 
   useEffect(() => {
-    const newModels = newPricing.filter((np) => !row.some((r) => r.model === np.model));
+    const newModels = effectivePricing.filter((np) => !row.some((r) => r.model === np.model));
 
     const changeModel = row.filter((r) =>
-      newPricing.some(
+      effectivePricing.some(
         (np) =>
           np.model === r.model &&
           (np.input !== r.input ||
@@ -251,7 +297,7 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
 
     if (changeModel.length > 0) {
       const changeModelList = changeModel.map((model) => {
-        const newModel = newPricing.find((np) => np.model === model.model);
+        const newModel = effectivePricing.find((np) => np.model === model.model);
         let changes = '';
         let extraRatiosChanges = '';
         let longContextChange = '';
@@ -287,7 +333,7 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
     } else {
       setDiffModel([]);
     }
-  }, [row, newPricing, t, hasExtraRatiosDiff, getExtraRatiosChanges, hasLongContextDiff, getLongContextChanges]);
+  }, [row, effectivePricing, t, hasExtraRatiosDiff, getExtraRatiosChanges, hasLongContextDiff, getLongContextChanges]);
 
   return (
     <Dialog
@@ -345,6 +391,17 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
           >
             {t('CheckUpdatesTable.fetchFromModelsDev')}
           </Button>
+          <Tooltip title={t('CheckUpdatesTable.channelOnlyTip')} placement="top-start">
+            <FormControlLabel
+              sx={{ display: 'flex', mt: 1 }}
+              control={<Switch size="small" checked={channelOnly} onChange={handleChannelOnlyChange} />}
+              label={
+                <Typography variant="body2">
+                  {t('CheckUpdatesTable.channelOnly')} ({channelModels.length})
+                </Typography>
+              }
+            />
+          </Tooltip>
         </Box>
 
         {newPricing.length > 0 && (
@@ -358,6 +415,14 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
                     color="primary"
                     sx={{ borderRadius: '16px' }}
                   />
+                  {channelOnly && (
+                    <Chip
+                      size="small"
+                      label={`${t('CheckUpdatesTable.matchedChannelModels')}: ${effectivePricing.length}`}
+                      color="info"
+                      sx={{ borderRadius: '16px' }}
+                    />
+                  )}
                   <Chip
                     size="small"
                     label={`${t('CheckUpdatesTable.newModels')}: ${addModel.length}`}
@@ -374,7 +439,13 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
               </CardContent>
             </Card>
 
-            {!addModel.length && !diffModel.length && (
+            {!effectivePricing.length && (
+              <Alert severity="warning" variant="outlined" sx={{ mb: 2, borderRadius: 1 }}>
+                {t('CheckUpdatesTable.noMatchedChannelModels')}
+              </Alert>
+            )}
+
+            {effectivePricing.length > 0 && !addModel.length && !diffModel.length && (
               <Alert severity="success" variant="outlined" sx={{ mb: 2, borderRadius: 1 }}>
                 {t('CheckUpdatesTable.noUpdates')}
               </Alert>
@@ -459,6 +530,31 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
                 </Card>
               )}
 
+              {missingInSource.length > 0 && (
+                <Card variant="outlined" sx={{ borderRadius: 1 }}>
+                  <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+                    <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Icon icon="solar:danger-triangle-bold" style={{ marginRight: 8 }} />
+                      {t('CheckUpdatesTable.missingInSource')} ({missingInSource.length})
+                    </Typography>
+                  </Box>
+                  <Box sx={{ p: 2, maxHeight: '150px', overflow: 'auto' }}>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8 }}>
+                      {missingInSource.map((model) => (
+                        <Chip
+                          key={model}
+                          label={model}
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          sx={{ borderRadius: '14px', fontSize: '0.75rem' }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                </Card>
+              )}
+
               <Alert
                 severity="info"
                 variant="outlined"
@@ -496,6 +592,7 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
               color="warning"
               onClick={() => syncPricing('update')}
               loading={updateLoading}
+              disabled={effectivePricing.length === 0}
               sx={{ borderRadius: '18px' }}
             >
               {t('CheckUpdatesTable.updateModeUpdate')}
@@ -506,6 +603,7 @@ export const CheckUpdates = ({ open, onCancel, onOk, row }) => {
               color="primary"
               onClick={() => syncPricing('overwrite')}
               loading={updateLoading}
+              disabled={effectivePricing.length === 0}
               sx={{ borderRadius: '18px' }}
             >
               {t('CheckUpdatesTable.updateModeOverwrite')}

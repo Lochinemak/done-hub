@@ -1451,7 +1451,12 @@
     "removed": "删除",
     "modified": "修改",
     "addNewOnly": "仅添加新增",
-    "overwriteData": "覆盖数据"
+    "overwriteData": "覆盖数据",
+    "channelOnly": "只处理渠道中已有的模型",
+    "channelOnlyTip": "开启后，预览与同步都只包含渠道里实际提供的模型（按模型名精确匹配），不会把价格源里上千个无关模型导入价格表",
+    "matchedChannelModels": "匹配渠道模型",
+    "missingInSource": "渠道中有但价格源缺少的模型（需手动添加价格）",
+    "noMatchedChannelModels": "价格源中没有与渠道模型匹配的条目，请检查渠道模型名或关闭过滤开关"
   },
   "error": {
     "unknownError": "未知错误"

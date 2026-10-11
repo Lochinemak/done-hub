@@ -57,7 +57,12 @@
     "longContextInput": "輸入倍率",
     "longContextOutput": "輸出倍率",
     "modified": "修改",
-    "removed": "刪除"
+    "removed": "刪除",
+    "channelOnly": "只處理渠道中已有的模型",
+    "channelOnlyTip": "開啟後，預覽與同步都只包含渠道裡實際提供的模型（按模型名精確匹配），不會把價格源裡上千個無關模型導入價格表",
+    "matchedChannelModels": "匹配渠道模型",
+    "missingInSource": "渠道中有但價格源缺少的模型（需手動添加價格）",
+    "noMatchedChannelModels": "價格源中沒有與渠道模型匹配的條目，請檢查渠道模型名或關閉過濾開關"
   },
   "Header 配置": "Header 配置",
   "sidebar": {

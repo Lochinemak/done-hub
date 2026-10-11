@@ -304,6 +304,7 @@ func SetApiRouter(router *gin.Engine) {
 		pricesRoute.Use(middleware.AdminAuth())
 		{
 			pricesRoute.GET("/model_list", controller.GetAllModelList)
+			pricesRoute.GET("/channel_model_list", controller.GetChannelModelList)
 			pricesRoute.POST("/single", controller.AddPrice)
 			pricesRoute.PUT("/single/*model", controller.UpdatePrice)
 			pricesRoute.DELETE("/single/*model", controller.DeletePrice)

@@ -274,6 +274,13 @@ func UpdatePriceByPriceService() error {
 	if err != nil {
 		return err
 	}
+	if viper.GetBool("auto_price_updates_channel_only") {
+		prices = FilterPricesByChannelModels(prices)
+		if len(prices) == 0 {
+			logger.SysLog("价格源中没有与渠道模型匹配的价格，跳过本次自动更新")
+			return nil
+		}
+	}
 	if updatePriceMode == string(PriceUpdateModeAdd) {
 		// 仅仅新增
 		p := &Pricing{
@@ -326,6 +333,25 @@ func UpdatePriceByPriceService() error {
 		return nil
 	}
 	return errors.New("更新模式错误，更新模式仅能选择：add、overwrite、system，详见配置文件auto_price_updates_mode部分的说明")
+}
+
+// FilterPricesByChannelModels 只保留渠道里实际提供的模型（按模型名精确匹配）。
+// 公共价格源动辄上千个模型，绝大多数本站并不提供；过滤后再同步，价格表只含真正用到的模型。
+func FilterPricesByChannelModels(prices []*Price) []*Price {
+	channelModels := ChannelGroup.GetAllModels()
+	allowed := make(map[string]bool, len(channelModels))
+	for _, modelName := range channelModels {
+		allowed[modelName] = true
+	}
+
+	filtered := make([]*Price, 0, len(prices))
+	for _, price := range prices {
+		if price != nil && allowed[price.Model] {
+			filtered = append(filtered, price)
+		}
+	}
+	logger.SysLog(fmt.Sprintf("按渠道模型过滤价格：价格源 %d 个，渠道模型 %d 个，匹配 %d 个", len(prices), len(channelModels), len(filtered)))
+	return filtered
 }
 
 // GetPriceByPriceService 只插入系统没有的数据

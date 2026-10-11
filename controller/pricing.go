@@ -35,19 +35,14 @@ func GetPricesList(c *gin.Context) {
 
 func GetAllModelList(c *gin.Context) {
 	prices := model.PricingInstance.GetAllPrices()
-	channelModel := model.ChannelGroup.Rule
 
 	modelsMap := make(map[string]bool)
 	for modelName := range prices {
 		modelsMap[modelName] = true
 	}
 
-	for _, modelMap := range channelModel {
-		for modelName := range modelMap {
-			if _, ok := prices[modelName]; !ok {
-				modelsMap[modelName] = true
-			}
-		}
+	for _, modelName := range model.ChannelGroup.GetAllModels() {
+		modelsMap[modelName] = true
 	}
 
 	var models []string
@@ -59,6 +54,16 @@ func GetAllModelList(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    models,
+	})
+}
+
+// GetChannelModelList 只返回渠道里实际提供的模型名（不含仅存在于价格表的模型）。
+// 前端「检查更新」用它把公共价格源过滤到本站真正用到的模型。
+func GetChannelModelList(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    model.ChannelGroup.GetAllModels(),
 	})
 }
 

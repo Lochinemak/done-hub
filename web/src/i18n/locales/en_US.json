@@ -55,7 +55,12 @@
     "longContextInput": "Input ratio",
     "longContextOutput": "Output ratio",
     "modified": "Edit",
-    "removed": "Delete"
+    "removed": "Delete",
+    "channelOnly": "Only models served by my channels",
+    "channelOnlyTip": "When enabled, preview and sync only include models actually served by your channels (exact name match), so the thousands of unrelated models in the price source are not imported",
+    "matchedChannelModels": "Matched channel models",
+    "missingInSource": "Channel models missing from the price source (add prices manually)",
+    "noMatchedChannelModels": "No entries in the price source match your channel models; check the model names or turn off the filter"
   },
   "menu": {
     "home": "Home",

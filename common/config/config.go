@@ -129,7 +129,10 @@ func defaultConfig() {
 	viper.SetDefault("auto_price_updates", false)
 	viper.SetDefault("auto_price_updates_mode", "system")
 	viper.SetDefault("auto_price_updates_interval", 1440)
-	viper.SetDefault("update_price_service", "https://raw.githubusercontent.com/MartialBE/one-api/prices/prices.json")
+	// 自动更新时是否只处理渠道里实际提供的模型（公共价格源有上千个模型，默认不过滤以保持旧行为）
+	viper.SetDefault("auto_price_updates_channel_only", false)
+	// MartialBE 的价格表已停更（200 余个模型，缺少 2025 下半年后的新模型），改用 Oaklight 维护的每 6 小时自动更新的价格表
+	viper.SetDefault("update_price_service", "https://raw.githubusercontent.com/Oaklight/onehub_prices/prices/oneapi_prices.json")
 	viper.SetDefault("language", "zh_CN")
 	viper.SetDefault("favicon", "")
 	viper.SetDefault("user_invoice_month", false)

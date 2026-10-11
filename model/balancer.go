@@ -772,6 +772,27 @@ func (cc *ChannelsChooser) GetGroupModels(group string) ([]string, error) {
 	return models, nil
 }
 
+// GetAllModels 返回所有分组下渠道实际提供的模型名（去重、排序）。
+// 价格同步时用它做「只处理渠道里有的模型」过滤，避免把价格源里上千个无关模型全部导入。
+func (cc *ChannelsChooser) GetAllModels() []string {
+	cc.RLock()
+	defer cc.RUnlock()
+
+	seen := make(map[string]bool)
+	for _, groupModels := range cc.Rule {
+		for modelName := range groupModels {
+			seen[modelName] = true
+		}
+	}
+
+	models := make([]string, 0, len(seen))
+	for modelName := range seen {
+		models = append(models, modelName)
+	}
+	sort.Strings(models)
+	return models
+}
+
 func (cc *ChannelsChooser) GetModelsGroups() map[string]map[string]bool {
 	cc.RLock()
 	defer cc.RUnlock()

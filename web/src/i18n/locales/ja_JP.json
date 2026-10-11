@@ -68,7 +68,12 @@
     "longContextInput": "入力倍率",
     "longContextOutput": "出力倍率",
     "modified": "変更",
-    "removed": "削除"
+    "removed": "削除",
+    "channelOnly": "チャネルにあるモデルのみ処理",
+    "channelOnlyTip": "有効にすると、プレビューと同期はチャネルが実際に提供しているモデル（モデル名の完全一致）のみを対象とし、価格ソースの無関係なモデルは取り込まれません",
+    "matchedChannelModels": "一致したチャネルモデル",
+    "missingInSource": "チャネルにあるが価格ソースにないモデル（手動で価格を追加してください）",
+    "noMatchedChannelModels": "価格ソースにチャネルモデルと一致する項目がありません。モデル名を確認するかフィルターをオフにしてください"
   },
   "sidebar": {
     "totalQuota": "総額",
