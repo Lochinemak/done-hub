@@ -25,6 +25,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # The default GITHUB_TOKEN is not allowed to modify files under
+          # .github/workflows/, so pushes fail whenever an upstream commit
+          # touches a workflow. Use a PAT with Contents + Workflows write.
+          token: ${{ secrets.SYNC_UPSTREAM_TOKEN }}
 
       - name: Fetch branches and upstream
         shell: bash
@@ -43,6 +47,8 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          failed_branches=()
 
           for target_branch in main dev; do
             echo "::group::Sync ${target_branch}"
@@ -64,15 +70,32 @@ jobs:
             echo "Cherry-picking ${#commits[@]} upstream commit(s) into ${target_branch}:"
             printf '  %s\n' "${commits[@]}"
 
+            branch_ok=true
             for commit in "${commits[@]}"; do
               if ! git cherry-pick "${commit}"; then
                 git status --short
                 git cherry-pick --abort
                 echo "::error::Cherry-pick ${commit} into ${target_branch} failed. Resolve the conflict manually, then run the workflow again."
-                exit 1
+                branch_ok=false
+                break
               fi
             done
 
-            git push origin "HEAD:${target_branch}"
+            if [[ "${branch_ok}" == true ]]; then
+              if ! git push origin "HEAD:${target_branch}"; then
+                echo "::error::Push to ${target_branch} failed."
+                branch_ok=false
+              fi
+            fi
+
+            if [[ "${branch_ok}" == false ]]; then
+              # Do not let one branch block the other; record and move on.
+              failed_branches+=("${target_branch}")
+            fi
             echo "::endgroup::"
           done
+
+          if (( ${#failed_branches[@]} > 0 )); then
+            echo "::error::Sync failed for: ${failed_branches[*]}"
+            exit 1
+          fi
