@@ -56,6 +56,25 @@ var firstPartyModelsDevProviders = map[string]bool{
 	"minimax": true, "alibaba": true, "stepfun": true, "perplexity": true,
 }
 
+// modelsDevProviderChannelType 把第一方 provider 映射到 done-hub 的渠道类型，
+// 这样从 models.dev 同步时价格表不会把所有模型都标成「供应商类型错误」（0）。
+// 不在表中的 provider 保持 Unknown，同步时会沿用系统内已有的类型（见 inheritChannelType）。
+var modelsDevProviderChannelType = map[string]int{
+	"anthropic":     config.ChannelTypeAnthropic,
+	"openai":        config.ChannelTypeOpenAI,
+	"google":        config.ChannelTypeGemini,
+	"google-vertex": config.ChannelTypeVertexAI,
+	"xai":           config.ChannelTypeXAI,
+	"deepseek":      config.ChannelTypeDeepseek,
+	"mistral":       config.ChannelTypeMistral,
+	"cohere":        config.ChannelTypeCohere,
+	"moonshotai":    config.ChannelTypeMoonshot,
+	"zhipuai":       config.ChannelTypeZhipu,
+	"zai":           config.ChannelTypeZhipu,
+	"minimax":       config.ChannelTypeMiniMax,
+	"alibaba":       config.ChannelTypeAli,
+}
+
 // isFirstPartyModelsDevProvider 判断 provider 是否为模型发布方官方源。
 func isFirstPartyModelsDevProvider(provider string) bool {
 	return firstPartyModelsDevProviders[provider]
@@ -260,7 +279,7 @@ func candidateToPrice(name string, c modelsDevCandidate) *Price {
 	price := &Price{
 		Model:       name,
 		Type:        TokensPriceType,
-		ChannelType: 0, // models.dev 无渠道类型语义，且 ChannelType 不参与计费，填 0（Unknown）。
+		ChannelType: modelsDevProviderChannelType[c.Provider], // 第一方 provider 映射渠道类型，其余为 Unknown（0）。
 		Input:       roundRatioValue(c.Input / modelsDevCostPerMillionBase),
 	}
 	if c.Output != nil {

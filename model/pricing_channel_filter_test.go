@@ -39,3 +39,25 @@ func TestFilterPricesByChannelModels(t *testing.T) {
 		t.Fatalf("unexpected filtered result: %+v", filtered)
 	}
 }
+
+func TestInheritChannelType(t *testing.T) {
+	existing := &Price{Model: "gpt-5", ChannelType: 1}
+
+	incoming := &Price{Model: "gpt-5", ChannelType: 0}
+	inheritChannelType(existing, incoming)
+	if incoming.ChannelType != 1 {
+		t.Fatalf("expected inherited channel type 1, got %d", incoming.ChannelType)
+	}
+
+	incoming = &Price{Model: "gpt-5", ChannelType: 20}
+	inheritChannelType(existing, incoming)
+	if incoming.ChannelType != 20 {
+		t.Fatalf("explicit channel type must be kept, got %d", incoming.ChannelType)
+	}
+
+	incoming = &Price{Model: "gpt-5", ChannelType: 0}
+	inheritChannelType(nil, incoming)
+	if incoming.ChannelType != 0 {
+		t.Fatalf("nil existing must not change channel type, got %d", incoming.ChannelType)
+	}
+}

@@ -390,6 +390,15 @@ func GetPriceByPriceService() ([]*Price, error) {
 	return prices, nil
 }
 
+// inheritChannelType 远程价格没带供应商类型（ChannelType 为 Unknown/0）时，沿用系统内已有的类型。
+// 如 models.dev 这类源本身没有渠道类型语义，更新/覆盖时若整行替换会把已有的供应商类型抹成 0，
+// 价格页就会把这些模型全部标成「供应商类型错误」。
+func inheritChannelType(existing, incoming *Price) {
+	if incoming.ChannelType == config.ChannelTypeUnknown && existing != nil {
+		incoming.ChannelType = existing.ChannelType
+	}
+}
+
 // SyncPriceWithOverwrite 删除系统所有数据并插入所有查询到的新数据 不含lock的数据
 func (p *Pricing) SyncPriceWithOverwrite(pricing []*Price) error {
 	tx := DB.Begin()
@@ -404,10 +413,11 @@ func (p *Pricing) SyncPriceWithOverwrite(pricing []*Price) error {
 
 	for _, price := range pricing {
 		// 取出系统存在并且非lock的价格到new price
-		if _, ok := p.Prices[price.Model]; !ok {
+		if existing, ok := p.Prices[price.Model]; !ok {
 			newPrices = append(newPrices, price)
 		} else {
-			if !p.Prices[price.Model].Locked {
+			if !existing.Locked {
+				inheritChannelType(existing, price)
 				newPrices = append(newPrices, price)
 			}
 		}
@@ -436,7 +446,8 @@ func (p *Pricing) SyncPriceOnlyUpdate(pricing []*Price) error {
 	var newPricesName []string
 	//系统内存在并且非lock的模型价格加入new price
 	for _, price := range pricing {
-		if p, ok := p.Prices[price.Model]; ok && !p.Locked {
+		if existing, ok := p.Prices[price.Model]; ok && !existing.Locked {
+			inheritChannelType(existing, price)
 			newPrices = append(newPrices, price)
 			newPricesName = append(newPricesName, price.Model)
 		}
