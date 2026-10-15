@@ -131,22 +131,52 @@ func (p *OpenAIProvider) CreateResponsesStream(request *types.OpenAIResponsesReq
 // 当客户端走的是 chat→responses 兼容路径（ConvertChat=true）或拿不到原始字节时，
 // 回退到结构体序列化路径 GetRequestTextBody。
 func (p *OpenAIProvider) getResponsesRequest(request *types.OpenAIResponsesRequest) (*http.Request, *types.OpenAIErrorWithStatusCode) {
+	var req *http.Request
+	var errWithCode *types.OpenAIErrorWithStatusCode
 	if !request.ConvertChat {
 		if patched, ok := p.patchResponsesRequestBody(request); ok {
-			url, errWithCode := p.GetSupportedAPIUri(config.RelayModeResponses)
-			if errWithCode != nil {
-				return nil, errWithCode
+			url, uriErr := p.GetSupportedAPIUri(config.RelayModeResponses)
+			if uriErr != nil {
+				return nil, uriErr
 			}
 			fullRequestURL := p.GetFullRequestURL(url, request.Model)
 			headers := p.GetRequestHeaders()
-			if request.Stream {
-				headers["Accept"] = "text/event-stream"
-			}
-			return p.NewRequestWithCustomParamsBytes(http.MethodPost, fullRequestURL, patched, headers, request.Model)
+			req, errWithCode = p.NewRequestWithCustomParamsBytes(http.MethodPost, fullRequestURL, patched, headers, request.Model)
 		}
 	}
+	if req == nil && errWithCode == nil {
+		req, errWithCode = p.GetRequestTextBody(config.RelayModeResponses, request.Model, request)
+	}
+	if errWithCode != nil {
+		return nil, errWithCode
+	}
 
-	return p.GetRequestTextBody(config.RelayModeResponses, request.Model, request)
+	// relay 按 request.Stream 选择 JSON / SSE 解析，上游必须收到相同的显式值。
+	// 原始请求可能省略 stream，结构体序列化也会因 omitempty 丢掉 false；
+	// 在所有请求体补丁和自定义参数之后统一设置，避免上游默认流式而被当作 JSON 解析。
+	body, err := io.ReadAll(req.Body)
+	req.Body.Close()
+	if err != nil {
+		return nil, common.ErrorWrapper(err, "read_request_body_failed", http.StatusInternalServerError)
+	}
+	stream := gjson.GetBytes(body, "stream")
+	if stream.Type != gjson.True && stream.Type != gjson.False || stream.Bool() != request.Stream {
+		body, err = sjson.SetBytes(body, "stream", request.Stream)
+		if err != nil {
+			return nil, common.ErrorWrapper(err, "patch_request_body_failed", http.StatusInternalServerError)
+		}
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+	if request.Stream {
+		req.Header.Set("Accept", "text/event-stream")
+	} else {
+		req.Header.Set("Accept", "application/json")
+	}
+	return req, nil
 }
 
 // patchResponsesRequestBody 读 gin 缓存里的原始 /v1/responses 请求体，
